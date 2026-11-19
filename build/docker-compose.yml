@@ -1,0 +1,20 @@
+# PostgreSQL for the FireDAC store tests only. The credentials below are test-only values; never use them elsewhere.
+#   docker compose -f build/docker-compose.yml up -d
+#   MCPAUTH_TEST_PG = 'DriverID=PG;Server=127.0.0.1;Port=55432;Database=mcpauth_test;User_Name=mcpauth_test;Password=mcpauth_test'
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mcpauth_test
+      POSTGRES_PASSWORD: mcpauth_test
+      POSTGRES_DB: mcpauth_test
+    ports:
+      - "55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mcpauth_test -d mcpauth_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

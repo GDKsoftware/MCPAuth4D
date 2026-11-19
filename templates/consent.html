@@ -1,0 +1,20 @@
+@LayoutPage layout.html
+<section class="card">
+  <h1>Allow access?</h1>
+  <p><strong>@page.ClientName</strong> asks for access to <strong>@page.ResourceName</strong> on your behalf.</p>
+  <dl>
+    <dt>Application</dt>
+    <dd>@page.ClientName</dd>
+    <dt>Resource</dt>
+    <dd>@page.ResourceName</dd>
+    <dt>After your decision you return to</dt>
+    <dd>@page.RedirectHost</dd>
+  </dl>
+  <p class="muted">Only approve this if you started this request yourself.</p>
+  <form method="post" action="/consent" class="actions">
+    <input type="hidden" name="pending" value="@page.PendingId">
+    <input type="hidden" name="csrf" value="@page.Csrf">
+    <button type="submit" name="decision" value="approve" class="primary">Approve</button>
+    <button type="submit" name="decision" value="deny">Deny</button>
+  </form>
+</section>
