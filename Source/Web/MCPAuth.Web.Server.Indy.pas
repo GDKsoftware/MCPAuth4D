@@ -19,6 +19,7 @@ type
     FServer: TIdHTTPServer;
     FPort: Word;
     FBindAddress: string;
+    FReadTimeoutMs: Integer;
 
     class function IsBodyTooLarge(const Headers: TIdHeaderList): Boolean; static;
     class function IsChunked(const Headers: TIdHeaderList): Boolean; static;
@@ -26,6 +27,7 @@ type
     class function HeaderSafe(const Value: string): string; static;
     class procedure DiscardBody(const Context: TIdContext; const Headers: TIdHeaderList); static;
 
+    procedure HandleConnect(AContext: TIdContext);
     procedure HandleCommand(AContext: TIdContext; ARequestInfo: TIdHTTPRequestInfo; AResponseInfo: TIdHTTPResponseInfo);
     procedure HandleHeadersAvailable(AContext: TIdContext; const AUri: string; AHeaders: TIdHeaderList; var VContinueProcessing: Boolean);
     procedure HandleHeadersBlocked(AContext: TIdContext; AHeaders: TIdHeaderList; var VResponseNo: Integer; var VResponseText, VContentText: string);
@@ -35,7 +37,13 @@ type
     function RouteRequest(const Request: TWebRequest): TWebResponse;
     procedure WriteResponse(const Response: TWebResponse; const ResponseInfo: TIdHTTPResponseInfo);
 
+    function GetMaxConnections: Integer;
+    procedure SetMaxConnections(const Value: Integer);
+
   public
+    const DEFAULT_MAX_CONNECTIONS = 256;
+    const DEFAULT_READ_TIMEOUT_MS = 30000;
+
     constructor Create(const Router: TWebRouter; const Port: Word; const BindAddress: string = '127.0.0.1');
     destructor Destroy; override;
 
@@ -44,6 +52,13 @@ type
 
     // The port the listener actually uses; differs from the requested port when that was 0.
     function BoundPort: Word;
+
+    // Connections above this limit are closed at once; 0 means no limit. Set before Start.
+    property MaxConnections: Integer read GetMaxConnections write SetMaxConnections;
+
+    // A client that sends nothing for this long while a request is read gets its connection closed,
+    // so slow clients cannot hold threads. Set before Start.
+    property ReadTimeoutMs: Integer read FReadTimeoutMs write FReadTimeoutMs;
   end;
 
 implementation
@@ -135,6 +150,9 @@ begin
   FServer.OnCommandOther := HandleCommand;
   FServer.OnHeadersAvailable := HandleHeadersAvailable;
   FServer.OnHeadersBlocked := HandleHeadersBlocked;
+  FServer.OnConnect := HandleConnect;
+  FServer.MaxConnections := DEFAULT_MAX_CONNECTIONS;
+  FReadTimeoutMs := DEFAULT_READ_TIMEOUT_MS;
 end;
 
 destructor TMCPAuthWebServer.Destroy;
@@ -169,6 +187,21 @@ begin
     Result := FServer.Bindings[0].Port
   else
     Result := FPort;
+end;
+
+function TMCPAuthWebServer.GetMaxConnections: Integer;
+begin
+  Result := FServer.MaxConnections;
+end;
+
+procedure TMCPAuthWebServer.SetMaxConnections(const Value: Integer);
+begin
+  FServer.MaxConnections := Value;
+end;
+
+procedure TMCPAuthWebServer.HandleConnect(AContext: TIdContext);
+begin
+  AContext.Connection.IOHandler.ReadTimeout := FReadTimeoutMs;
 end;
 
 procedure TMCPAuthWebServer.HandleHeadersAvailable(AContext: TIdContext; const AUri: string; AHeaders: TIdHeaderList; var VContinueProcessing: Boolean);

@@ -12,7 +12,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 
 # Folders with this repository's own units; every subfolder with a .pas file joins the search path.
-$ownSourceRoots = @('Source', 'Tests')
+$ownSourceRoots = @('Source', 'Server', 'Tests')
 
 # Library folders; subfolders with tests, samples, packages or UI code are left out.
 $librarySourceRoots = @(

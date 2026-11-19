@@ -53,6 +53,9 @@ type
 
     [Test]
     procedure ServerListensOnlyOnTheGivenAddress;
+
+    [Test]
+    procedure SilentClientIsDisconnectedAfterReadTimeout;
   end;
 
 implementation
@@ -61,6 +64,11 @@ uses
   System.Classes,
   System.JSON,
   System.Net.URLClient,
+  System.Diagnostics,
+  IdTCPClient,
+  IdExceptionCore,
+  IdStack,
+  IdException,
   MCPServer.Logger,
   MCPAuth.OAuth.Settings,
   MCPAuth.OAuth.Metadata;
@@ -76,6 +84,9 @@ const
   StatusPayloadTooLarge = 413;
   StatusServerError = 500;
   SecretValue = 'secret-token-123';
+  ShortReadTimeoutMs = 200;
+  ClientReadTimeoutMs = 5000;
+  PromptDisconnectMs = 3000;
 
 { TMCPAuthWebServerTests }
 
@@ -267,6 +278,44 @@ begin
       FClient.Get(OtherAddressUrl);
     end,
     ENetHTTPClientException);
+end;
+
+procedure TMCPAuthWebServerTests.SilentClientIsDisconnectedAfterReadTimeout;
+begin
+  const Server = TMCPAuthWebServer.Create(FRouter, 0, Loopback);
+  try
+    Server.ReadTimeoutMs := ShortReadTimeoutMs;
+    Server.Start;
+
+    const Client = TIdTCPClient.Create(nil);
+    try
+      Client.Host := Loopback;
+      Client.Port := Server.BoundPort;
+      Client.ReadTimeout := ClientReadTimeoutMs;
+      Client.Connect;
+
+      const Watch = TStopwatch.StartNew;
+      var IsClosedByServer := False;
+      while not IsClosedByServer and (Watch.ElapsedMilliseconds < ClientReadTimeoutMs) do
+      begin
+        try
+          Client.IOHandler.ReadLn;
+        except
+          on EIdConnClosedGracefully do
+            IsClosedByServer := True;
+          on EIdSocketError do
+            IsClosedByServer := True;
+        end;
+      end;
+
+      Assert.IsTrue(IsClosedByServer, 'the server closes a connection that sends nothing');
+      Assert.IsTrue(Watch.ElapsedMilliseconds < PromptDisconnectMs, 'the connection is closed after the read timeout');
+    finally
+      Client.Free;
+    end;
+  finally
+    Server.Free;
+  end;
 end;
 
 end.
