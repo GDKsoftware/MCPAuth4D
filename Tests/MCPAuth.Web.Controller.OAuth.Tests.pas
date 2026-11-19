@@ -33,12 +33,15 @@ type
 
     class function QueryParam(const Url, Name: string): string; static;
     class function CookieValue(const SetCookie: string): string; static;
+    class function SetCookieNamed(const Response: TWebResponse; const Name: string): string; static;
     class function HeaderValue(const Response: TWebResponse; const Name: string): string; static;
     class function FindLibraryTemplatesPath: string; static;
 
     function BuildResourceRegistryJson: string;
     procedure RegisterClient;
     function NewRequest(const Method, Path, Query, Body, SessionCookie: string): TWebRequest;
+    function CallbackRequest(const LoginCookie, SessionCookie: string): TWebRequest;
+    function StartAuthorizeLogin: string;
     function AuthorizeQuery(const RedirectUri, ChallengeMethod: string): string;
     function SignIn(out PendingId: string): string;
     function CsrfOf(const SessionCookie: string): string;
@@ -77,6 +80,15 @@ type
 
     [Test]
     procedure CallbackWithUnknownStateShowsErrorPage;
+
+    [Test]
+    procedure CallbackWithoutLoginCookieIsRejected;
+
+    [Test]
+    procedure CallbackWithOtherBrowsersLoginCookieIsRejected;
+
+    [Test]
+    procedure LoginCookieIsHttpOnlySecureLaxAndClearedAfterSignIn;
 
     [Test]
     procedure ConsentApproveRedirectsToClientWithCodeAndState;
@@ -170,7 +182,8 @@ const
   OtherUser = 'user-other';
   KeyId = 'k1';
   KeyLength = 32;
-  SessionCookieName = 'mcpauth_session';
+  SessionCookieName = '__Host-mcpauth_session';
+  LoginCookieName = '__Host-mcpauth_login';
   FormContentType = 'application/x-www-form-urlencoded';
   StatusOk = 200;
   StatusCreated = 201;
@@ -204,6 +217,17 @@ begin
   const SeparatorIndex = Pair.IndexOf('=');
 
   Result := Pair.Substring(SeparatorIndex + 1);
+end;
+
+class function TOAuthControllerTests.SetCookieNamed(const Response: TWebResponse; const Name: string): string;
+begin
+  for var SetCookie in Response.SetCookies do
+  begin
+    if SetCookie.StartsWith(Name + '=') then
+      Exit(SetCookie);
+  end;
+
+  Result := '';
 end;
 
 class function TOAuthControllerTests.HeaderValue(const Response: TWebResponse; const Name: string): string;
@@ -310,6 +334,22 @@ begin
     Result.Cookies[SessionCookieName] := SessionCookie;
 end;
 
+function TOAuthControllerTests.CallbackRequest(const LoginCookie, SessionCookie: string): TWebRequest;
+begin
+  const CallbackQuery = Format('code=%s&state=%s', [UpstreamCode, TNetEncoding.URL.EncodeForm(FProvider.LastState)]);
+
+  Result := NewRequest('GET', '/callback/' + ProviderName, CallbackQuery, '', SessionCookie);
+  if not LoginCookie.IsEmpty then
+    Result.Cookies[LoginCookieName] := LoginCookie;
+end;
+
+function TOAuthControllerTests.StartAuthorizeLogin: string;
+begin
+  const Authorize = FRouter.Dispatch(NewRequest('GET', '/authorize', AuthorizeQuery(RedirectUri, 'S256'), '', ''));
+
+  Result := CookieValue(SetCookieNamed(Authorize, LoginCookieName));
+end;
+
 function TOAuthControllerTests.AuthorizeQuery(const RedirectUri, ChallengeMethod: string): string;
 begin
   const Fields: TArray<string> = [
@@ -328,16 +368,13 @@ end;
 
 function TOAuthControllerTests.SignIn(out PendingId: string): string;
 begin
-  FRouter.Dispatch(NewRequest('GET', '/authorize', AuthorizeQuery(RedirectUri, 'S256'), '', ''));
-
-  const CallbackQuery = Format('code=%s&state=%s', [UpstreamCode, TNetEncoding.URL.EncodeForm(FProvider.LastState)]);
-  const Callback = FRouter.Dispatch(NewRequest('GET', '/callback/' + ProviderName, CallbackQuery, '', ''));
+  const LoginCookie = StartAuthorizeLogin;
+  const Callback = FRouter.Dispatch(CallbackRequest(LoginCookie, ''));
 
   Assert.AreEqual(StatusFound, Callback.StatusCode, Callback.Body);
-  Assert.AreEqual<Integer>(1, Length(Callback.SetCookies), 'one session cookie');
 
   PendingId := QueryParam(Callback.Location, 'pending');
-  Result := CookieValue(Callback.SetCookies[0]);
+  Result := CookieValue(SetCookieNamed(Callback, SessionCookieName));
 end;
 
 function TOAuthControllerTests.CsrfOf(const SessionCookie: string): string;
@@ -436,7 +473,8 @@ begin
 
   Assert.AreEqual(StatusFound, Response.StatusCode, Response.Body);
   Assert.StartsWith('https://login.example.test/authorize', Response.Location);
-  Assert.AreEqual<Integer>(0, Length(Response.SetCookies), 'no session yet');
+  Assert.IsEmpty(SetCookieNamed(Response, SessionCookieName), 'no session yet');
+  Assert.IsNotEmpty(SetCookieNamed(Response, LoginCookieName), 'the browser is bound to the sign-in');
 end;
 
 procedure TOAuthControllerTests.AuthorizeWithSessionRedirectsToConsent;
@@ -488,6 +526,49 @@ begin
   Assert.StartsWith('text/html', Response.ContentType);
   Assert.IsEmpty(Response.Location);
   Assert.AreEqual<Integer>(0, Length(Response.SetCookies), 'no session');
+end;
+
+procedure TOAuthControllerTests.CallbackWithoutLoginCookieIsRejected;
+begin
+  StartAuthorizeLogin;
+
+  const Response = FRouter.Dispatch(CallbackRequest('', ''));
+
+  Assert.AreEqual(StatusForbidden, Response.StatusCode, Response.Body);
+  Assert.StartsWith('text/html', Response.ContentType);
+  Assert.IsEmpty(Response.Location);
+  Assert.IsEmpty(SetCookieNamed(Response, SessionCookieName), 'no session');
+  Assert.AreEqual(0, FProvider.ExchangeCount, 'the upstream code is not redeemed');
+end;
+
+procedure TOAuthControllerTests.CallbackWithOtherBrowsersLoginCookieIsRejected;
+begin
+  const VictimLoginCookie = StartAuthorizeLogin;
+  StartAuthorizeLogin;
+
+  // The callback URL of the second sign-in is opened in the browser of the first one.
+  const Response = FRouter.Dispatch(CallbackRequest(VictimLoginCookie, ''));
+
+  Assert.AreEqual(StatusForbidden, Response.StatusCode, Response.Body);
+  Assert.IsEmpty(Response.Location);
+  Assert.IsEmpty(SetCookieNamed(Response, SessionCookieName), 'no session');
+  Assert.AreEqual(0, FProvider.ExchangeCount, 'the upstream code is not redeemed');
+end;
+
+procedure TOAuthControllerTests.LoginCookieIsHttpOnlySecureLaxAndClearedAfterSignIn;
+begin
+  const Authorize = FRouter.Dispatch(NewRequest('GET', '/authorize', AuthorizeQuery(RedirectUri, 'S256'), '', ''));
+  const LoginCookie = SetCookieNamed(Authorize, LoginCookieName);
+
+  Assert.Contains(LoginCookie, '; HttpOnly');
+  Assert.Contains(LoginCookie, '; Secure');
+  Assert.Contains(LoginCookie, '; SameSite=Lax');
+  Assert.Contains(LoginCookie, Format('; Max-Age=%d', [FSettings.PendingSeconds]));
+
+  const Callback = FRouter.Dispatch(CallbackRequest(CookieValue(LoginCookie), ''));
+
+  Assert.AreEqual(StatusFound, Callback.StatusCode, Callback.Body);
+  Assert.Contains(SetCookieNamed(Callback, LoginCookieName), 'Max-Age=0');
 end;
 
 procedure TOAuthControllerTests.ConsentApproveRedirectsToClientWithCodeAndState;
@@ -682,13 +763,11 @@ end;
 
 procedure TOAuthControllerTests.SessionCookieIsHttpOnlySecureLax;
 begin
-  FRouter.Dispatch(NewRequest('GET', '/authorize', AuthorizeQuery(RedirectUri, 'S256'), '', ''));
-  const CallbackQuery = Format('code=%s&state=%s', [UpstreamCode, TNetEncoding.URL.EncodeForm(FProvider.LastState)]);
+  const LoginCookie = StartAuthorizeLogin;
 
-  const Response = FRouter.Dispatch(NewRequest('GET', '/callback/' + ProviderName, CallbackQuery, '', ''));
+  const Response = FRouter.Dispatch(CallbackRequest(LoginCookie, ''));
 
-  Assert.AreEqual<Integer>(1, Length(Response.SetCookies));
-  const Cookie = Response.SetCookies[0];
+  const Cookie = SetCookieNamed(Response, SessionCookieName);
   Assert.StartsWith(SessionCookieName + '=', Cookie);
   Assert.Contains(Cookie, '; HttpOnly');
   Assert.Contains(Cookie, '; Secure');
@@ -713,6 +792,7 @@ begin
   const InsecureSessions: IWebSessions = TWebSessions.Create(FStores.Sessions, TTokenGenerator.Create, FSettings, FClockReference);
   InsecureSessions.Start(OtherUser, Cookie);
   Assert.DoesNotContain(Cookie, 'Secure');
+  Assert.StartsWith('mcpauth_session=', Cookie, 'the __Host- prefix needs Secure');
 end;
 
 procedure TOAuthControllerTests.UnknownPathRenders404Page;

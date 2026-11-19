@@ -53,10 +53,13 @@ type
     function BeginAuthorize(const Request: TAuthorizeRequest): TAuthorizeStart; overload;
     function BeginAuthorize(const Request: TAuthorizeRequest; const SessionUserId: string): TAuthorizeStart; overload;
 
-    function BeginLogin(const ProviderName: string; const Purpose: TLoginPurpose; const UserId: string = ''): string;
+    // The caller hands Start.BrowserBinding to the browser (login cookie); the callback must present it again.
+    function BeginLogin(const ProviderName: string; const Purpose: TLoginPurpose; const UserId: string = ''): TAuthorizeStart;
 
+    // Rejects a callback from another browser than the one that started the sign-in, and a link callback
+    // whose session user is not the user who started linking; both before the provider is called.
     // Also raises EUpstreamError from the provider and EAccessDenied or EAccountLinkedToOtherUser from the linked accounts.
-    function CompleteUpstream(const ProviderName, State, Code: string): TUpstreamCompletion;
+    function CompleteUpstream(const Callback: TUpstreamCallback): TUpstreamCompletion;
 
     function ConsentInfo(const PendingId: string): TConsentInfo;
 

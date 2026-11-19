@@ -18,6 +18,7 @@ type
     FSettings: TMCPAuthSettings;
     FClock: IClock;
 
+    function CookieName: string;
     function BuildCookie(const Value: string; const MaxAgeSeconds: Integer): string;
 
   public
@@ -34,12 +35,11 @@ implementation
 uses
   System.SysUtils,
   System.DateUtils,
-  MCPAuth.Secret.Hash;
+  MCPAuth.Secret.Hash,
+  MCPAuth.Web.Cookie;
 
 const
   SessionCookieName = 'mcpauth_session';
-  CookieFormat = '%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Lax%s';
-  SecureAttribute = '; Secure';
   SecondsPerHour = 3600;
 
 { TWebSessions }
@@ -59,7 +59,7 @@ begin
   Session := Default(TWebSession);
 
   var SessionId: string;
-  const HasCookie = (Request.TryGetCookie(SessionCookieName, SessionId) and not SessionId.IsEmpty);
+  const HasCookie = (Request.TryGetCookie(CookieName, SessionId) and not SessionId.IsEmpty);
   if not HasCookie then
     Exit(False);
 
@@ -84,7 +84,7 @@ end;
 procedure TWebSessions.Finish(const Request: TWebRequest; out Cookie: string);
 begin
   var SessionId: string;
-  const HasCookie = (Request.TryGetCookie(SessionCookieName, SessionId) and not SessionId.IsEmpty);
+  const HasCookie = (Request.TryGetCookie(CookieName, SessionId) and not SessionId.IsEmpty);
   if HasCookie then
     FStore.Remove(TTokenHash.Of(SessionId));
 
@@ -98,13 +98,14 @@ begin
   Result := HasTokens and TTokenHash.SameHash(Session.CsrfToken, Token);
 end;
 
+function TWebSessions.CookieName: string;
+begin
+  Result := TWebCookie.NameOf(SessionCookieName, FSettings.SecureCookies);
+end;
+
 function TWebSessions.BuildCookie(const Value: string; const MaxAgeSeconds: Integer): string;
 begin
-  var Secure := '';
-  if FSettings.SecureCookies then
-    Secure := SecureAttribute;
-
-  Result := Format(CookieFormat, [SessionCookieName, Value, MaxAgeSeconds, Secure]);
+  Result := TWebCookie.Build(SessionCookieName, Value, MaxAgeSeconds, FSettings.SecureCookies);
 end;
 
 end.

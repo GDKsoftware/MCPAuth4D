@@ -53,8 +53,10 @@ type
 
     function HandleCallback(const Request: TWebRequest): TWebResponse;
     function CompleteSignIn(const Request: TWebRequest): TWebResponse;
+    function UpstreamCallbackOf(const Request: TWebRequest): TUpstreamCallback;
     function SignedInResponse(const Request: TWebRequest; const Completion: TUpstreamCompletion): TWebResponse;
     function SignedInLocation(const Completion: TUpstreamCompletion): string;
+    function CallbackErrorPage(const Error: EOAuthError): TWebResponse;
 
     function HandleConsentPage(const Request: TWebRequest): TWebResponse;
     function ConsentPage(const Session: TWebSession; const PendingId: string): TWebResponse;
@@ -94,7 +96,8 @@ uses
   MCPAuth.Upstream.Exceptions,
   MCPAuth.Upstream.FormEncoding,
   MCPAuth.OAuth.Metadata,
-  MCPAuth.Web.ErrorLog;
+  MCPAuth.Web.ErrorLog,
+  MCPAuth.Web.LoginBinding;
 
 const
   StatusOk = 200;
@@ -365,6 +368,7 @@ begin
   const Start = FServer.BeginAuthorize(AuthorizeRequest);
 
   Result := TWebResponse.Redirect(Start.UpstreamUrl);
+  Result.AddCookie(TLoginBindingCookie.Issue(Start.BrowserBinding, FSettings));
 end;
 
 function TOAuthController.HandleCallback(const Request: TWebRequest): TWebResponse;
@@ -377,7 +381,7 @@ begin
     Result := CompleteSignIn(Request);
   except
     on E: EOAuthError do
-      Result := ErrorPage(StatusBadRequest, E.Message);
+      Result := CallbackErrorPage(E);
     on EAccessDenied do
       Result := ErrorPage(StatusForbidden, AccessDeniedMessage);
     on EAccountLinkedToOtherUser do
@@ -389,25 +393,40 @@ end;
 
 function TOAuthController.CompleteSignIn(const Request: TWebRequest): TWebResponse;
 begin
-  const ProviderName = Request.Path.Substring(CallbackPrefix.Length);
-  const State = Request.QueryParam('state');
-  const Code = Request.QueryParam('code');
-
-  const Completion = FServer.CompleteUpstream(ProviderName, State, Code);
+  const Completion = FServer.CompleteUpstream(UpstreamCallbackOf(Request));
 
   Result := SignedInResponse(Request, Completion);
+  Result.AddCookie(TLoginBindingCookie.Clear(FSettings));
+end;
+
+function TOAuthController.UpstreamCallbackOf(const Request: TWebRequest): TUpstreamCallback;
+begin
+  Result := Default(TUpstreamCallback);
+  Result.ProviderName   := Request.Path.Substring(CallbackPrefix.Length);
+  Result.State          := Request.QueryParam('state');
+  Result.Code           := Request.QueryParam('code');
+  Result.BrowserBinding := TLoginBindingCookie.BindingOf(Request, FSettings);
+
+  var Session: TWebSession;
+  if FSessions.TryCurrent(Request, Session) then
+    Result.SessionUserId := Session.UserId;
 end;
 
 function TOAuthController.SignedInResponse(const Request: TWebRequest; const Completion: TUpstreamCompletion): TWebResponse;
 begin
+  Result := TWebResponse.Redirect(SignedInLocation(Completion));
+
+  // Linking adds an account to the user of the current session, which the server has checked; that session stays.
+  const IsLinking = (Completion.Purpose = TLoginPurpose.LinkAccount);
+  if IsLinking then
+    Exit;
+
   // A sign-in always gets a fresh session id; a session from before the sign-in is ended.
   var EndedCookie: string;
   FSessions.Finish(Request, EndedCookie);
 
   var Cookie: string;
   FSessions.Start(Completion.UserId, Cookie);
-
-  Result := TWebResponse.Redirect(SignedInLocation(Completion));
   Result.AddCookie(Cookie);
 end;
 
@@ -420,6 +439,16 @@ begin
   else
     raise ENotSupportedException.CreateFmt('Unsupported login purpose: %d', [Ord(Completion.Purpose)]);
   end;
+end;
+
+function TOAuthController.CallbackErrorPage(const Error: EOAuthError): TWebResponse;
+begin
+  // Access denied here means another browser or another session than the one that started the sign-in.
+  const IsOtherBrowser = (Error.ErrorCode = TOAuthErrorCode.AccessDenied);
+  if IsOtherBrowser then
+    Result := ErrorPage(StatusForbidden, Error.Message)
+  else
+    Result := ErrorPage(StatusBadRequest, Error.Message);
 end;
 
 function TOAuthController.HandleConsentPage(const Request: TWebRequest): TWebResponse;

@@ -197,6 +197,7 @@ begin
   Result.UserId := 'user-1';
   Result.UpstreamProvider := 'microsoft';
   Result.UpstreamVerifier := 'verifier';
+  Result.BrowserBindingHash := 'binding-hash';
   Result.ExpiresAtUtc := ExpiresAtUtc;
 end;
 
@@ -359,6 +360,7 @@ begin
   Assert.IsTrue(CanTake);
   Assert.IsFalse(CanTakeAgain);
   Assert.AreEqual('verifier', Taken.UpstreamVerifier);
+  Assert.AreEqual('binding-hash', Taken.BrowserBindingHash);
   Assert.AreEqual<TLoginPurpose>(TLoginPurpose.LinkAccount, Taken.Purpose);
 end;
 

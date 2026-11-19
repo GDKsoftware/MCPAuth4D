@@ -318,7 +318,7 @@ end;
 procedure TServerComposition.BuildRouters;
 begin
   FOAuthController := TOAuthController.Create(FAuthorizationServer, FStores.Clients, FSessions, FPages, FTokens, FAuthSettings, FClock);
-  FAccountController := TAccountController.Create(FAuthorizationServer, FAccounts, FRegistry, FProviders, FSessions, FPages, FStores);
+  FAccountController := TAccountController.Create(FAuthorizationServer, FAccounts, FRegistry, FProviders, FSessions, FPages, FStores, FAuthSettings);
   FInternalController := TInternalController.Create(FRegistry, FStores.Tokens, FAccounts);
 
   FPublicRouter := TWebRouter.Create;

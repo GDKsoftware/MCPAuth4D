@@ -27,6 +27,7 @@ type
     UserId: string;
     UpstreamProvider: string;
     UpstreamVerifier: string;
+    BrowserBindingHash: string;          // hash of the login cookie of the browser that started the upstream sign-in
     ExpiresAtUtc: TDateTime;
   end;
 
@@ -76,6 +77,15 @@ type
   TAuthorizeStart = record
     PendingId: string;
     UpstreamUrl: string;                 // empty when the caller already has a session
+    BrowserBinding: string;              // value for the login cookie; empty when no upstream sign-in starts
+  end;
+
+  TUpstreamCallback = record
+    ProviderName: string;
+    State: string;
+    Code: string;
+    BrowserBinding: string;              // the login cookie of the calling browser; empty when it sent none
+    SessionUserId: string;               // the user of the calling browser's session; empty without one
   end;
 
   TUpstreamCompletion = record

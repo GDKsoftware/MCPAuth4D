@@ -36,6 +36,7 @@ type
     FRouter: TWebRouter;
 
     class function CookieValue(const SetCookie: string): string; static;
+    class function SetCookieNamed(const Response: TWebResponse; const Name: string): string; static;
     class function FindLibraryTemplatesPath: string; static;
     class function UserKey(const ObjectId: string): TAccountKey; static;
 
@@ -43,7 +44,9 @@ type
     procedure BuildHosts(const Providers: TArray<IUpstreamProvider>);
     procedure FreeHosts;
     function NewRequest(const Method, Path, Query, Body, SessionCookie: string): TWebRequest;
+    function CallbackRequest(const LoginCookie, SessionCookie: string): TWebRequest;
     function SignInAs(const ObjectId, DisplayName, UserName: string): string;
+    function StartLinking(const SessionCookie: string): string;
     function PostForm(const Path, Body, SessionCookie: string): TWebResponse;
     function CsrfOf(const SessionCookie: string): string;
     function UserIdOf(const SessionCookie: string): string;
@@ -100,6 +103,15 @@ type
 
     [Test]
     procedure LinkWithoutCsrfIsRejected;
+
+    [Test]
+    procedure LinkKeepsTheSession;
+
+    [Test]
+    procedure LinkCallbackFromOtherBrowserDoesNotLink;
+
+    [Test]
+    procedure LinkCallbackWithOtherSessionUserIsRejected;
 
     [Test]
     procedure PostsWithoutSessionAreRejected;
@@ -160,7 +172,8 @@ const
   UpstreamCode = 'upstream-code';
   KeyId = 'k1';
   KeyLength = 32;
-  SessionCookieName = 'mcpauth_session';
+  SessionCookieName = '__Host-mcpauth_session';
+  LoginCookieName = '__Host-mcpauth_login';
   FormContentType = 'application/x-www-form-urlencoded';
   UpstreamLoginPrefix = 'https://login.example.test/authorize';
   StatusOk = 200;
@@ -181,6 +194,17 @@ begin
   const SeparatorIndex = Pair.IndexOf('=');
 
   Result := Pair.Substring(SeparatorIndex + 1);
+end;
+
+class function TAccountControllerTests.SetCookieNamed(const Response: TWebResponse; const Name: string): string;
+begin
+  for var SetCookie in Response.SetCookies do
+  begin
+    if SetCookie.StartsWith(Name + '=') then
+      Exit(SetCookie);
+  end;
+
+  Result := '';
 end;
 
 class function TAccountControllerTests.FindLibraryTemplatesPath: string;
@@ -264,7 +288,7 @@ begin
 
   FSessions := TWebSessions.Create(FStores.Sessions, Tokens, FSettings, FClockReference);
   FOAuthController := TOAuthController.Create(Server, FStores.Clients, FSessions, Pages, Tokens, FSettings, FClockReference);
-  FAccountController := TAccountController.Create(Server, FAccounts, Registry, UpstreamProviders, FSessions, Pages, FStores);
+  FAccountController := TAccountController.Create(Server, FAccounts, Registry, UpstreamProviders, FSessions, Pages, FStores, FSettings);
 
   FRouter := TWebRouter.Create;
   FOAuthController.Register(FRouter);
@@ -296,6 +320,15 @@ begin
     Result.Cookies[SessionCookieName] := SessionCookie;
 end;
 
+function TAccountControllerTests.CallbackRequest(const LoginCookie, SessionCookie: string): TWebRequest;
+begin
+  const CallbackQuery = Format('code=%s&state=%s', [UpstreamCode, TNetEncoding.URL.EncodeForm(FProvider.LastState)]);
+
+  Result := NewRequest('GET', '/callback/' + ProviderName, CallbackQuery, '', SessionCookie);
+  if not LoginCookie.IsEmpty then
+    Result.Cookies[LoginCookieName] := LoginCookie;
+end;
+
 function TAccountControllerTests.SignInAs(const ObjectId, DisplayName, UserName: string): string;
 begin
   FProvider.SetIdentity(TenantId, ObjectId, DisplayName, UserName);
@@ -304,12 +337,21 @@ begin
   Assert.AreEqual(StatusFound, Login.StatusCode, Login.Body);
   Assert.StartsWith(UpstreamLoginPrefix, Login.Location);
 
-  const CallbackQuery = Format('code=%s&state=%s', [UpstreamCode, TNetEncoding.URL.EncodeForm(FProvider.LastState)]);
-  const Callback = FRouter.Dispatch(NewRequest('GET', '/callback/' + ProviderName, CallbackQuery, '', ''));
+  const LoginCookie = CookieValue(SetCookieNamed(Login, LoginCookieName));
+  const Callback = FRouter.Dispatch(CallbackRequest(LoginCookie, ''));
 
   Assert.AreEqual(StatusFound, Callback.StatusCode, Callback.Body);
   Assert.AreEqual('/account', Callback.Location);
-  Result := CookieValue(Callback.SetCookies[0]);
+  Result := CookieValue(SetCookieNamed(Callback, SessionCookieName));
+end;
+
+function TAccountControllerTests.StartLinking(const SessionCookie: string): string;
+begin
+  const Body = Format('provider=%s&csrf=%s', [ProviderName, TNetEncoding.URL.EncodeForm(CsrfOf(SessionCookie))]);
+  const Response = PostForm('/account/link', Body, SessionCookie);
+  Assert.AreEqual(StatusFound, Response.StatusCode, Response.Body);
+
+  Result := CookieValue(SetCookieNamed(Response, LoginCookieName));
 end;
 
 function TAccountControllerTests.PostForm(const Path, Body, SessionCookie: string): TWebResponse;
@@ -461,8 +503,8 @@ begin
   Assert.StartsWith(UpstreamLoginPrefix, Reconnect.Location);
 
   FProvider.RefreshToken := 'refreshed-after-reconnect';
-  const CallbackQuery = Format('code=%s&state=%s', [UpstreamCode, TNetEncoding.URL.EncodeForm(FProvider.LastState)]);
-  const Callback = FRouter.Dispatch(NewRequest('GET', '/callback/' + ProviderName, CallbackQuery, '', SessionCookie));
+  const LoginCookie = CookieValue(SetCookieNamed(Reconnect, LoginCookieName));
+  const Callback = FRouter.Dispatch(CallbackRequest(LoginCookie, SessionCookie));
   Assert.AreEqual('/account', Callback.Location, Callback.Body);
 
   var Account: TLinkedAccount;
@@ -571,6 +613,57 @@ begin
 
   Assert.AreEqual(StatusForbidden, Response.StatusCode);
   Assert.IsEmpty(Response.Location);
+end;
+
+procedure TAccountControllerTests.LinkKeepsTheSession;
+begin
+  const SessionCookie = SignInAs(FirstObjectId, 'Test User', 'user@example.test');
+  const UserId = UserIdOf(SessionCookie);
+  const LoginCookie = StartLinking(SessionCookie);
+
+  FProvider.SetIdentity(TenantId, SecondObjectId, 'Second Account', 'second@example.test');
+  const Callback = FRouter.Dispatch(CallbackRequest(LoginCookie, SessionCookie));
+
+  Assert.AreEqual(StatusFound, Callback.StatusCode, Callback.Body);
+  Assert.AreEqual('/account', Callback.Location);
+  Assert.IsEmpty(SetCookieNamed(Callback, SessionCookieName), 'no new session');
+  Assert.IsTrue(IsSessionStored(SessionCookie), 'the session that started linking stays');
+  Assert.AreEqual<Integer>(2, CountAccounts(UserId));
+end;
+
+procedure TAccountControllerTests.LinkCallbackFromOtherBrowserDoesNotLink;
+begin
+  const VictimCookie = SignInAs(FirstObjectId, 'Victim', 'victim@example.test');
+  const VictimId = UserIdOf(VictimCookie);
+  const AttackerCookie = SignInAs(OtherObjectId, 'Attacker', 'attacker@example.test');
+  const AttackerId = UserIdOf(AttackerCookie);
+  StartLinking(AttackerCookie);
+
+  // The victim opens the upstream URL of the attacker; the callback arrives in the browser of the victim,
+  // which has its own session but not the login cookie of the attacker.
+  const Callback = FRouter.Dispatch(CallbackRequest('', VictimCookie));
+
+  Assert.AreEqual(StatusForbidden, Callback.StatusCode, Callback.Body);
+  Assert.IsEmpty(Callback.Location);
+  Assert.IsEmpty(SetCookieNamed(Callback, SessionCookieName), 'no session handed out');
+  Assert.AreEqual<Integer>(1, CountAccounts(AttackerId), 'the victim account is not linked to the attacker');
+  Assert.AreEqual<Integer>(1, CountAccounts(VictimId), 'the victim account stays with the victim');
+  Assert.IsTrue(IsSessionStored(VictimCookie), 'the victim session stays');
+end;
+
+procedure TAccountControllerTests.LinkCallbackWithOtherSessionUserIsRejected;
+begin
+  const VictimCookie = SignInAs(FirstObjectId, 'Victim', 'victim@example.test');
+  const AttackerCookie = SignInAs(OtherObjectId, 'Attacker', 'attacker@example.test');
+  const AttackerId = UserIdOf(AttackerCookie);
+  const AttackerLoginCookie = StartLinking(AttackerCookie);
+
+  // Even with the login cookie of the attacker, a link only completes in the session that started it.
+  const Callback = FRouter.Dispatch(CallbackRequest(AttackerLoginCookie, VictimCookie));
+
+  Assert.AreEqual(StatusForbidden, Callback.StatusCode, Callback.Body);
+  Assert.IsEmpty(Callback.Location);
+  Assert.AreEqual<Integer>(1, CountAccounts(AttackerId), 'the victim account is not linked to the attacker');
 end;
 
 procedure TAccountControllerTests.PostsWithoutSessionAreRejected;

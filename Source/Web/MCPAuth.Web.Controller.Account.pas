@@ -8,7 +8,9 @@ uses
   MCPAuth.Identity.Interfaces,
   MCPAuth.Identity.Types,
   MCPAuth.Upstream.Interfaces,
+  MCPAuth.OAuth.Types,
   MCPAuth.OAuth.Interfaces,
+  MCPAuth.OAuth.Settings,
   MCPAuth.Web.Types,
   MCPAuth.Web.Router,
   MCPAuth.Web.Session.Interfaces,
@@ -30,6 +32,7 @@ type
     FSessions: IWebSessions;
     FPages: IPageRenderer;
     FStores: TStoreSet;
+    FSettings: TMCPAuthSettings;
 
     class function WithNoStore(const Response: TWebResponse): TWebResponse; static;
     class function IsoUtc(const ValueUtc: TDateTime): string; static;
@@ -60,6 +63,7 @@ type
     function Revoke(const Request: TWebRequest; const Session: TWebSession): TWebResponse;
     function Logout(const Request: TWebRequest; const Session: TWebSession): TWebResponse;
     function TryFindOwnAccount(const UserId, KeyValue: string; out Account: TLinkedAccount): Boolean;
+    function RedirectToUpstream(const Start: TAuthorizeStart): TWebResponse;
 
     function ErrorPage(const StatusCode: Integer; const Message: string): TWebResponse;
     function Page(const StatusCode: Integer; const Template: string; const Model: TPageModel): TWebResponse;
@@ -71,7 +75,8 @@ type
                        const Providers: IUpstreamProviders;
                        const Sessions: IWebSessions;
                        const Pages: IPageRenderer;
-                       const Stores: TStoreSet);
+                       const Stores: TStoreSet;
+                       const Settings: TMCPAuthSettings);
 
     procedure Register(const Router: TWebRouter);
   end;
@@ -82,9 +87,9 @@ uses
   System.SysUtils,
   MCPAuth.Identity.Exceptions,
   MCPAuth.OAuth.Errors,
-  MCPAuth.OAuth.Types,
   MCPAuth.Resource.Types,
-  MCPAuth.Web.ErrorLog;
+  MCPAuth.Web.ErrorLog,
+  MCPAuth.Web.LoginBinding;
 
 const
   StatusOk = 200;
@@ -141,7 +146,8 @@ constructor TAccountController.Create(const Server: IAuthorizationServer;
                                       const Providers: IUpstreamProviders;
                                       const Sessions: IWebSessions;
                                       const Pages: IPageRenderer;
-                                      const Stores: TStoreSet);
+                                      const Stores: TStoreSet;
+                                      const Settings: TMCPAuthSettings);
 begin
   inherited Create;
 
@@ -152,6 +158,7 @@ begin
   FSessions := Sessions;
   FPages := Pages;
   FStores := Stores;
+  FSettings := Settings;
 end;
 
 procedure TAccountController.Register(const Router: TWebRouter);
@@ -247,8 +254,8 @@ end;
 function TAccountController.StartPortalLogin(const ProviderName: string): TWebResponse;
 begin
   try
-    const UpstreamUrl = FServer.BeginLogin(ProviderName, TLoginPurpose.Portal);
-    Result := WithNoStore(TWebResponse.Redirect(UpstreamUrl));
+    const Start = FServer.BeginLogin(ProviderName, TLoginPurpose.Portal);
+    Result := RedirectToUpstream(Start);
   except
     on E: EOAuthError do
       Result := ErrorPage(StatusBadRequest, E.Message);
@@ -373,8 +380,8 @@ end;
 function TAccountController.StartLinking(const ProviderName: string; const Session: TWebSession): TWebResponse;
 begin
   try
-    const UpstreamUrl = FServer.BeginLogin(ProviderName, TLoginPurpose.LinkAccount, Session.UserId);
-    Result := WithNoStore(TWebResponse.Redirect(UpstreamUrl));
+    const Start = FServer.BeginLogin(ProviderName, TLoginPurpose.LinkAccount, Session.UserId);
+    Result := RedirectToUpstream(Start);
   except
     on E: EOAuthError do
       Result := ErrorPage(StatusBadRequest, E.Message);
@@ -438,6 +445,12 @@ begin
   end;
 
   Result := False;
+end;
+
+function TAccountController.RedirectToUpstream(const Start: TAuthorizeStart): TWebResponse;
+begin
+  Result := WithNoStore(TWebResponse.Redirect(Start.UpstreamUrl));
+  Result.AddCookie(TLoginBindingCookie.Issue(Start.BrowserBinding, FSettings));
 end;
 
 function TAccountController.ErrorPage(const StatusCode: Integer; const Message: string): TWebResponse;

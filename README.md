@@ -262,7 +262,7 @@ A store that is not SQL implements the interfaces in `MCPAuth.Store.Interfaces`,
 | | `MCPAuth.Store.FireDAC.Interfaces`, `.ConnectionFactory`, `.PgDriver`, `.Command`, `.Dialect`, `.Exceptions` | Connections, driver, statements and dialect |
 | | `MCPAuth.Store.FireDAC.Migrations` | Versioned SQL migrations |
 | Web | `MCPAuth.Web.Types`, `.Router` | Request, response and router, independent of Indy |
-| | `MCPAuth.Web.Session.Interfaces`, `.Session` | Session cookies and CSRF |
+| | `MCPAuth.Web.Session.Interfaces`, `.Session`, `.Cookie`, `.LoginBinding` | Session cookies, CSRF and the login cookie that binds an upstream sign-in to its browser |
 | | `MCPAuth.Web.Page.Interfaces`, `.Page.Models`, `.Page.WebStencils`, `.Page.Exceptions` | Page models and the WebStencils renderer |
 | | `MCPAuth.Web.Controller.OAuth`, `.Controller.Account` | Public OAuth endpoints and the account pages |
 | | `MCPAuth.Web.Server.Indy` | `TMCPAuthWebServer`: one router on one Indy listener |

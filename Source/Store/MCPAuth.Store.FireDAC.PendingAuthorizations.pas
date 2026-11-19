@@ -39,7 +39,7 @@ uses
 const
   Table = 'mcpauth_pending_authorizations';
   Columns: TArray<string> = ['id', 'purpose', 'client_id', 'redirect_uri', 'code_challenge', 'state', 'scope', 'resource',
-                             'user_id', 'upstream_provider', 'upstream_verifier', 'expires_at'];
+                             'user_id', 'upstream_provider', 'upstream_verifier', 'browser_binding_hash', 'expires_at'];
   AuthorizeText = 'authorize';
   LinkAccountText = 'link_account';
   PortalText = 'portal';
@@ -100,6 +100,7 @@ begin
     Command.SetText('user_id', Pending.UserId);
     Command.SetText('upstream_provider', Pending.UpstreamProvider);
     Command.SetText('upstream_verifier', Pending.UpstreamVerifier);
+    Command.SetText('browser_binding_hash', Pending.BrowserBindingHash);
     Command.SetUtc('expires_at', Pending.ExpiresAtUtc);
     Command.Execute;
   finally
@@ -163,6 +164,7 @@ begin
   Result.UserId := Command.Text('user_id');
   Result.UpstreamProvider := Command.Text('upstream_provider');
   Result.UpstreamVerifier := Command.Text('upstream_verifier');
+  Result.BrowserBindingHash := Command.Text('browser_binding_hash');
   Result.ExpiresAtUtc := Command.Utc('expires_at');
 end;
 

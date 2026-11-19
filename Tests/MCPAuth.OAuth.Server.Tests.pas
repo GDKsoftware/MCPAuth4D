@@ -32,6 +32,8 @@ type
     function BuildResourceRegistryJson: string;
     procedure RegisterClient;
     function AuthorizeRequest(const Resource: string): TAuthorizeRequest;
+    function CallbackFor(const Start: TAuthorizeStart; const SessionUserId: string = ''): TUpstreamCallback;
+    function SignInWithPortal: TUpstreamCompletion;
     function ObtainCode(const Resource: string): string;
     function ObtainCodeWithSession(const Resource, UserId: string): string;
     function CodeRequest(const Code: string): TTokenRequest;
@@ -112,6 +114,18 @@ type
 
     [Test]
     procedure LinkAccountLoginLinksToGivenUser;
+
+    [Test]
+    procedure CallbackWithoutBrowserBindingIsRejected;
+
+    [Test]
+    procedure CallbackWithOtherBrowserBindingIsRejected;
+
+    [Test]
+    procedure LinkCallbackWithOtherSessionUserIsRejected;
+
+    [Test]
+    procedure LinkCallbackWithoutSessionIsRejected;
 
     [Test]
     procedure RevokeRemovesFamily;
@@ -243,10 +257,27 @@ begin
   Result.Resource            := Resource;
 end;
 
+function TAuthorizationServerTests.CallbackFor(const Start: TAuthorizeStart; const SessionUserId: string): TUpstreamCallback;
+begin
+  Result := Default(TUpstreamCallback);
+  Result.ProviderName   := ProviderName;
+  Result.State          := FProvider.LastState;
+  Result.Code           := UpstreamCode;
+  Result.BrowserBinding := Start.BrowserBinding;
+  Result.SessionUserId  := SessionUserId;
+end;
+
+function TAuthorizationServerTests.SignInWithPortal: TUpstreamCompletion;
+begin
+  const Start = FServer.BeginLogin(ProviderName, TLoginPurpose.Portal);
+
+  Result := FServer.CompleteUpstream(CallbackFor(Start));
+end;
+
 function TAuthorizationServerTests.ObtainCode(const Resource: string): string;
 begin
-  FServer.BeginAuthorize(AuthorizeRequest(Resource));
-  const Completion = FServer.CompleteUpstream(ProviderName, FProvider.LastState, UpstreamCode);
+  const Start = FServer.BeginAuthorize(AuthorizeRequest(Resource));
+  const Completion = FServer.CompleteUpstream(CallbackFor(Start));
   const Redirect = FServer.Approve(Completion.PendingId, Completion.UserId);
 
   Result := QueryParam(Redirect, 'code');
@@ -530,8 +561,8 @@ end;
 
 procedure TAuthorizationServerTests.DenyRedirectsWithAccessDeniedAndState;
 begin
-  FServer.BeginAuthorize(AuthorizeRequest(ResourceA));
-  const Completion = FServer.CompleteUpstream(ProviderName, FProvider.LastState, UpstreamCode);
+  const Start = FServer.BeginAuthorize(AuthorizeRequest(ResourceA));
+  const Completion = FServer.CompleteUpstream(CallbackFor(Start));
 
   const Redirect = FServer.Deny(Completion.PendingId, Completion.UserId);
 
@@ -591,14 +622,14 @@ end;
 
 procedure TAuthorizationServerTests.UpstreamCallbackIsSingleUse;
 begin
-  FServer.BeginAuthorize(AuthorizeRequest(ResourceA));
-  const State = FProvider.LastState;
-  FServer.CompleteUpstream(ProviderName, State, UpstreamCode);
+  const Start = FServer.BeginAuthorize(AuthorizeRequest(ResourceA));
+  const Callback = CallbackFor(Start);
+  FServer.CompleteUpstream(Callback);
 
   const ErrorCode = ErrorCodeOf(
     procedure
     begin
-      FServer.CompleteUpstream(ProviderName, State, UpstreamCode);
+      FServer.CompleteUpstream(Callback);
     end);
 
   Assert.AreEqual(TOAuthErrorCode.InvalidRequest, ErrorCode);
@@ -618,16 +649,87 @@ end;
 
 procedure TAuthorizationServerTests.LinkAccountLoginLinksToGivenUser;
 begin
-  FServer.BeginLogin(ProviderName, TLoginPurpose.Portal);
-  const Login = FServer.CompleteUpstream(ProviderName, FProvider.LastState, UpstreamCode);
+  const Login = SignInWithPortal;
   FProvider.SetIdentity('tenant-2', 'object-2', 'Second', 'second@example.test');
 
-  FServer.BeginLogin(ProviderName, TLoginPurpose.LinkAccount, Login.UserId);
-  const Link = FServer.CompleteUpstream(ProviderName, FProvider.LastState, UpstreamCode);
+  const Start = FServer.BeginLogin(ProviderName, TLoginPurpose.LinkAccount, Login.UserId);
+  const Link = FServer.CompleteUpstream(CallbackFor(Start, Login.UserId));
 
   Assert.IsTrue(Link.Purpose = TLoginPurpose.LinkAccount, 'purpose');
   Assert.AreEqual(Login.UserId, Link.UserId);
   Assert.AreEqual(2, FStores.LinkedAccounts.ListForUser(Login.UserId).Count);
+end;
+
+procedure TAuthorizationServerTests.CallbackWithoutBrowserBindingIsRejected;
+begin
+  const Start = FServer.BeginAuthorize(AuthorizeRequest(ResourceA));
+  Assert.IsNotEmpty(Start.BrowserBinding, 'binding handed out');
+
+  var Callback := CallbackFor(Start);
+  Callback.BrowserBinding := '';
+
+  const ErrorCode = ErrorCodeOf(
+    procedure
+    begin
+      FServer.CompleteUpstream(Callback);
+    end);
+
+  Assert.AreEqual(TOAuthErrorCode.AccessDenied, ErrorCode);
+  Assert.AreEqual(0, FProvider.ExchangeCount, 'the upstream code is not redeemed');
+end;
+
+procedure TAuthorizationServerTests.CallbackWithOtherBrowserBindingIsRejected;
+begin
+  const VictimStart = FServer.BeginLogin(ProviderName, TLoginPurpose.Portal);
+  const AttackerStart = FServer.BeginLogin(ProviderName, TLoginPurpose.Portal);
+
+  // The attacker's state arrives in the victim's browser, which holds the victim's own login cookie.
+  var Callback := CallbackFor(AttackerStart);
+  Callback.BrowserBinding := VictimStart.BrowserBinding;
+
+  const ErrorCode = ErrorCodeOf(
+    procedure
+    begin
+      FServer.CompleteUpstream(Callback);
+    end);
+
+  Assert.AreEqual(TOAuthErrorCode.AccessDenied, ErrorCode);
+  Assert.AreEqual(0, FProvider.ExchangeCount, 'the upstream code is not redeemed');
+end;
+
+procedure TAuthorizationServerTests.LinkCallbackWithOtherSessionUserIsRejected;
+begin
+  const Attacker = SignInWithPortal;
+  FProvider.SetIdentity('tenant-2', 'object-victim', 'Victim', 'victim@example.test');
+  const Victim = SignInWithPortal;
+  const ExchangesBefore = FProvider.ExchangeCount;
+
+  const Start = FServer.BeginLogin(ProviderName, TLoginPurpose.LinkAccount, Attacker.UserId);
+  const ErrorCode = ErrorCodeOf(
+    procedure
+    begin
+      FServer.CompleteUpstream(CallbackFor(Start, Victim.UserId));
+    end);
+
+  Assert.AreEqual(TOAuthErrorCode.AccessDenied, ErrorCode);
+  Assert.AreEqual(ExchangesBefore, FProvider.ExchangeCount, 'the upstream code is not redeemed');
+  Assert.AreEqual(1, FStores.LinkedAccounts.ListForUser(Attacker.UserId).Count, 'nothing linked to the attacker');
+end;
+
+procedure TAuthorizationServerTests.LinkCallbackWithoutSessionIsRejected;
+begin
+  const Login = SignInWithPortal;
+  FProvider.SetIdentity('tenant-2', 'object-2', 'Second', 'second@example.test');
+
+  const Start = FServer.BeginLogin(ProviderName, TLoginPurpose.LinkAccount, Login.UserId);
+  const ErrorCode = ErrorCodeOf(
+    procedure
+    begin
+      FServer.CompleteUpstream(CallbackFor(Start));
+    end);
+
+  Assert.AreEqual(TOAuthErrorCode.AccessDenied, ErrorCode);
+  Assert.AreEqual(1, FStores.LinkedAccounts.ListForUser(Login.UserId).Count, 'nothing linked');
 end;
 
 procedure TAuthorizationServerTests.RevokeRemovesFamily;

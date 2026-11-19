@@ -51,6 +51,8 @@ type
     function AwaitConsent(const Pending: TPendingAuthorization): string;
 
     function TakeUpstreamPending(const ProviderName, State: string): TPendingAuthorization;
+    procedure GuardSameBrowser(const Pending: TPendingAuthorization; const BrowserBinding: string);
+    procedure GuardLinkingUser(const Pending: TPendingAuthorization; const SessionUserId: string);
     function CompleteAuthorizeLogin(const Pending: TPendingAuthorization; const Tokens: TUpstreamTokens): TUpstreamCompletion;
     function CompleteLinkAccount(const Pending: TPendingAuthorization; const Tokens: TUpstreamTokens): TUpstreamCompletion;
     function CompletePortalLogin(const Pending: TPendingAuthorization; const Tokens: TUpstreamTokens): TUpstreamCompletion;
@@ -79,8 +81,8 @@ type
     function BeginAuthorize(const Request: TAuthorizeRequest): TAuthorizeStart; overload;
     function BeginAuthorize(const Request: TAuthorizeRequest; const SessionUserId: string): TAuthorizeStart; overload;
 
-    function BeginLogin(const ProviderName: string; const Purpose: TLoginPurpose; const UserId: string = ''): string;
-    function CompleteUpstream(const ProviderName, State, Code: string): TUpstreamCompletion;
+    function BeginLogin(const ProviderName: string; const Purpose: TLoginPurpose; const UserId: string = ''): TAuthorizeStart;
+    function CompleteUpstream(const Callback: TUpstreamCallback): TUpstreamCompletion;
 
     function ConsentInfo(const PendingId: string): TConsentInfo;
     function Approve(const PendingId, UserId: string): string;
@@ -117,6 +119,8 @@ const
 
   UnknownPendingMessage = 'The authorization request is unknown or has expired';
   UnknownLoginMessage = 'The sign-in request is unknown or has expired';
+  OtherBrowserMessage = 'The sign-in was started in another browser. Start again from this browser.';
+  OtherLinkingUserMessage = 'The account can only be linked from the session that started linking it.';
   InvalidCodeMessage = 'The authorization code is invalid or has expired';
   InvalidRefreshTokenMessage = 'The refresh token is invalid or has expired';
 
@@ -301,17 +305,20 @@ function TAuthorizationServer.StartUpstreamLogin(const Pending: TPendingAuthoriz
 begin
   const State = FTokens.NewToken;
   const Verifier = TPkce.NewVerifier;
+  const BrowserBinding = FTokens.NewToken;
 
   var Stored := Pending;
-  Stored.Id               := TTokenHash.Of(State);
-  Stored.UpstreamProvider := Provider.Name;
-  Stored.UpstreamVerifier := Verifier;
-  Stored.ExpiresAtUtc     := PendingExpiry;
+  Stored.Id                 := TTokenHash.Of(State);
+  Stored.UpstreamProvider   := Provider.Name;
+  Stored.UpstreamVerifier   := Verifier;
+  Stored.BrowserBindingHash := TTokenHash.Of(BrowserBinding);
+  Stored.ExpiresAtUtc       := PendingExpiry;
   FStores.Pending.Put(Stored);
 
   const Challenge = TPkce.ChallengeOf(Verifier);
-  Result.PendingId := Stored.Id;
-  Result.UpstreamUrl := Provider.AuthorizationUrl(State, Challenge, CallbackUri(Provider));
+  Result.PendingId      := Stored.Id;
+  Result.UpstreamUrl    := Provider.AuthorizationUrl(State, Challenge, CallbackUri(Provider));
+  Result.BrowserBinding := BrowserBinding;
 end;
 
 function TAuthorizationServer.CallbackUri(const Provider: IUpstreamProvider): string;
@@ -328,15 +335,16 @@ function TAuthorizationServer.AwaitConsent(const Pending: TPendingAuthorization)
 begin
   var Waiting := Pending;
   Waiting.Id               := TTokenHash.Of(FTokens.NewToken);
-  Waiting.UpstreamProvider := '';
-  Waiting.UpstreamVerifier := '';
-  Waiting.ExpiresAtUtc     := PendingExpiry;
+  Waiting.UpstreamProvider   := '';
+  Waiting.UpstreamVerifier   := '';
+  Waiting.BrowserBindingHash := '';
+  Waiting.ExpiresAtUtc       := PendingExpiry;
   FStores.Pending.Put(Waiting);
 
   Result := Waiting.Id;
 end;
 
-function TAuthorizationServer.BeginLogin(const ProviderName: string; const Purpose: TLoginPurpose; const UserId: string): string;
+function TAuthorizationServer.BeginLogin(const ProviderName: string; const Purpose: TLoginPurpose; const UserId: string): TAuthorizeStart;
 begin
   const IsAuthorize = (Purpose = TLoginPurpose.Authorize);
   if IsAuthorize then
@@ -352,15 +360,17 @@ begin
   Pending.Purpose := Purpose;
   Pending.UserId := UserId;
 
-  const Start = StartUpstreamLogin(Pending, Provider);
-  Result := Start.UpstreamUrl;
+  Result := StartUpstreamLogin(Pending, Provider);
 end;
 
-function TAuthorizationServer.CompleteUpstream(const ProviderName, State, Code: string): TUpstreamCompletion;
+function TAuthorizationServer.CompleteUpstream(const Callback: TUpstreamCallback): TUpstreamCompletion;
 begin
-  const Pending = TakeUpstreamPending(ProviderName, State);
+  const Pending = TakeUpstreamPending(Callback.ProviderName, Callback.State);
+  GuardSameBrowser(Pending, Callback.BrowserBinding);
+  GuardLinkingUser(Pending, Callback.SessionUserId);
+
   const Provider = GetProvider(Pending.UpstreamProvider);
-  const Tokens = Provider.ExchangeCode(Code, Pending.UpstreamVerifier, CallbackUri(Provider));
+  const Tokens = Provider.ExchangeCode(Callback.Code, Pending.UpstreamVerifier, CallbackUri(Provider));
 
   case Pending.Purpose of
     TLoginPurpose.Authorize   : Result := CompleteAuthorizeLogin(Pending, Tokens);
@@ -385,6 +395,26 @@ begin
   const IsSameProvider = SameText(Result.UpstreamProvider, ProviderName);
   if not (IsWaitingForUpstream and IsSameProvider) then
     raise EOAuthError.Create(TOAuthErrorCode.InvalidRequest, UnknownLoginMessage);
+end;
+
+procedure TAuthorizationServer.GuardSameBrowser(const Pending: TPendingAuthorization; const BrowserBinding: string);
+begin
+  // The state travels in a URL that can be handed to someone else; the login cookie cannot.
+  const HasBinding = not BrowserBinding.IsEmpty;
+  const IsSameBrowser = (HasBinding and TTokenHash.SameHash(Pending.BrowserBindingHash, TTokenHash.Of(BrowserBinding)));
+  if not IsSameBrowser then
+    raise EOAuthError.Create(TOAuthErrorCode.AccessDenied, OtherBrowserMessage);
+end;
+
+procedure TAuthorizationServer.GuardLinkingUser(const Pending: TPendingAuthorization; const SessionUserId: string);
+begin
+  const IsLinking = (Pending.Purpose = TLoginPurpose.LinkAccount);
+  if not IsLinking then
+    Exit;
+
+  const IsLinkingUser = (not SessionUserId.IsEmpty and (SessionUserId = Pending.UserId));
+  if not IsLinkingUser then
+    raise EOAuthError.Create(TOAuthErrorCode.AccessDenied, OtherLinkingUserMessage);
 end;
 
 function TAuthorizationServer.CompleteAuthorizeLogin(const Pending: TPendingAuthorization; const Tokens: TUpstreamTokens): TUpstreamCompletion;
