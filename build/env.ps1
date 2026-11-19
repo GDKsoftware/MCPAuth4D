@@ -32,3 +32,12 @@ Set-DefaultVariable 'LINUX_SDK_LIBPATH' {
   $libraryFolders -join ';'
 }
 Set-DefaultVariable 'WSL_DISTRO' { 'Ubuntu' }
+
+# Folder with libpq.dll and the DLLs it depends on, put on the PATH of the Win64 tests for the FireDAC PostgreSQL driver.
+Set-DefaultVariable 'PG_BIN_DIR' {
+  Get-ChildItem 'C:\Program Files\PostgreSQL' -Directory -ErrorAction SilentlyContinue |
+    Sort-Object { [int]($_.Name -replace '\D.*$', '') } |
+    ForEach-Object { Join-Path $_.FullName 'bin' } |
+    Where-Object { Test-Path (Join-Path $_ 'libpq.dll') } |
+    Select-Object -Last 1
+}

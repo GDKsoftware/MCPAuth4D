@@ -47,7 +47,10 @@ uses
   MCPAuth.Internal.Controller.Tests in 'MCPAuth.Internal.Controller.Tests.pas',
   MCPAuth.Web.Controller.Account.Tests in 'MCPAuth.Web.Controller.Account.Tests.pas',
   MCPAuth.Web.Server.Indy.Tests in 'MCPAuth.Web.Server.Indy.Tests.pas',
-  MCPAuth.Client.Tests in 'MCPAuth.Client.Tests.pas';
+  MCPAuth.Client.Tests in 'MCPAuth.Client.Tests.pas',
+  MCPAuth.Tests.Postgres in 'MCPAuth.Tests.Postgres.pas',
+  MCPAuth.Store.FireDAC.Tests in 'MCPAuth.Store.FireDAC.Tests.pas',
+  MCPAuth.Store.FireDAC.Migrations.Tests in 'MCPAuth.Store.FireDAC.Migrations.Tests.pas';
 
 begin
   ReportMemoryLeaksOnShutdown := True;

@@ -35,7 +35,13 @@ type
     function CountMissingKeys: Integer;
 
   protected
+    // Passes the running test when UnavailableReason is not empty.
+    procedure RequireStore;
+
     function CreateStore(const Clock: IClock): TStoreSet; virtual; abstract;
+
+    // A non-empty reason makes every test pass without touching a store, for stores that need an external server.
+    function UnavailableReason: string; virtual;
 
   public
     [Setup]
@@ -99,6 +105,12 @@ type
     procedure ExpiredSessionIsNotFound;
 
     [Test]
+    procedure ClientRoundTrips;
+
+    [Test]
+    procedure RemovedSessionIsNotFound;
+
+    [Test]
     procedure ConcurrentSavesAreSafe;
   end;
 
@@ -121,7 +133,12 @@ procedure TStoreContractTests.Setup;
 begin
   FFakeClock := TFakeClock.Create(BaseTime);
   FClock := FFakeClock;
-  FStores := CreateStore(FClock);
+
+  const IsStoreAvailable = UnavailableReason.IsEmpty;
+  if IsStoreAvailable then
+  begin
+    FStores := CreateStore(FClock);
+  end;
 end;
 
 procedure TStoreContractTests.TearDown;
@@ -129,6 +146,20 @@ begin
   FStores := Default(TStoreSet);
   FClock := nil;
   FFakeClock := nil;
+end;
+
+function TStoreContractTests.UnavailableReason: string;
+begin
+  Result := '';
+end;
+
+procedure TStoreContractTests.RequireStore;
+begin
+  const Reason = UnavailableReason;
+  if not Reason.IsEmpty then
+  begin
+    Assert.Pass(Reason);
+  end;
 end;
 
 function TStoreContractTests.BaseTime: TDateTime;
@@ -204,6 +235,8 @@ end;
 
 procedure TStoreContractTests.SavedUserCanBeRead;
 begin
+  RequireStore;
+
   var User := Default(TAuthUser);
   User.Id := 'user-1';
   User.DisplayName := 'First User';
@@ -221,6 +254,8 @@ end;
 
 procedure TStoreContractTests.UnknownUserIsNotFound;
 begin
+  RequireStore;
+
   var Found: TAuthUser;
 
   const IsFound = FStores.Users.TryGet('nobody', Found);
@@ -230,6 +265,8 @@ end;
 
 procedure TStoreContractTests.LinkedAccountRoundTrips;
 begin
+  RequireStore;
+
   const Expected = NewAccount('user-1', 'object-1');
   FStores.LinkedAccounts.Save(Expected);
 
@@ -252,6 +289,8 @@ end;
 
 procedure TStoreContractTests.SavingKeyOfOtherUserRaises;
 begin
+  RequireStore;
+
   const Original = NewAccount('user-1', 'object-1');
   FStores.LinkedAccounts.Save(Original);
   var Hijack := NewAccount('user-2', 'object-1');
@@ -272,6 +311,8 @@ end;
 
 procedure TStoreContractTests.ListForUserReturnsOnlyOwnAccounts;
 begin
+  RequireStore;
+
   FStores.LinkedAccounts.Save(NewAccount('user-1', 'object-1'));
   FStores.LinkedAccounts.Save(NewAccount('user-1', 'object-2'));
   FStores.LinkedAccounts.Save(NewAccount('user-2', 'object-3'));
@@ -287,6 +328,8 @@ end;
 
 procedure TStoreContractTests.DeleteRemovesOnlyThatAccount;
 begin
+  RequireStore;
+
   const First = NewAccount('user-1', 'object-1');
   const Second = NewAccount('user-1', 'object-2');
   FStores.LinkedAccounts.Save(First);
@@ -301,6 +344,8 @@ end;
 
 procedure TStoreContractTests.PendingCanBeReadThenTakenOnce;
 begin
+  RequireStore;
+
   FStores.Pending.Put(NewPending('pending-1', IncMinute(BaseTime, 10)));
 
   var Read: TPendingAuthorization;
@@ -319,6 +364,8 @@ end;
 
 procedure TStoreContractTests.ExpiredPendingIsNotTaken;
 begin
+  RequireStore;
+
   FStores.Pending.Put(NewPending('pending-1', IncMinute(BaseTime, 10)));
   FFakeClock.AdvanceSeconds(11 * 60);
 
@@ -332,6 +379,8 @@ end;
 
 procedure TStoreContractTests.GrantIsTakenOnce;
 begin
+  RequireStore;
+
   FStores.Grants.Put(NewGrant('code-1', IncMinute(BaseTime, 1)));
 
   var Taken: TAuthorizationGrant;
@@ -347,6 +396,8 @@ end;
 
 procedure TStoreContractTests.ExpiredGrantIsNotTaken;
 begin
+  RequireStore;
+
   FStores.Grants.Put(NewGrant('code-1', IncMinute(BaseTime, 1)));
   FFakeClock.AdvanceSeconds(120);
 
@@ -358,6 +409,8 @@ end;
 
 procedure TStoreContractTests.RefreshTokenIsConsumedOnce;
 begin
+  RequireStore;
+
   FStores.Tokens.Save(NewToken('hash-1', 'family-1', 'user-1', IncDay(BaseTime, 1)));
 
   var Consumed: TIssuedToken;
@@ -372,6 +425,8 @@ end;
 
 procedure TStoreContractTests.ConsumedTokenIsKnownWithFamily;
 begin
+  RequireStore;
+
   FStores.Tokens.Save(NewToken('hash-1', 'family-1', 'user-1', IncDay(BaseTime, 1)));
   FStores.Tokens.Save(NewToken('hash-2', 'family-1', 'user-1', IncDay(BaseTime, 1)));
   var Token: TIssuedToken;
@@ -391,6 +446,8 @@ end;
 
 procedure TStoreContractTests.DeleteFamilyRemovesAllTokensOfFamily;
 begin
+  RequireStore;
+
   FStores.Tokens.Save(NewToken('hash-1', 'family-1', 'user-1', IncDay(BaseTime, 1)));
   FStores.Tokens.Save(NewToken('hash-2', 'family-1', 'user-1', IncDay(BaseTime, 1)));
   FStores.Tokens.Save(NewToken('hash-3', 'family-2', 'user-1', IncDay(BaseTime, 1)));
@@ -405,6 +462,8 @@ end;
 
 procedure TStoreContractTests.DeleteForUserRemovesAllTokensOfUser;
 begin
+  RequireStore;
+
   FStores.Tokens.Save(NewToken('hash-1', 'family-1', 'user-1', IncDay(BaseTime, 1)));
   FStores.Tokens.Save(NewToken('hash-2', 'family-2', 'user-1', IncDay(BaseTime, 1)));
   FStores.Tokens.Save(NewToken('hash-3', 'family-3', 'user-2', IncDay(BaseTime, 1)));
@@ -419,6 +478,8 @@ end;
 
 procedure TStoreContractTests.ListFamiliesForUserGroupsByFamily;
 begin
+  RequireStore;
+
   FStores.Tokens.Save(NewTokenFor('hash-1', 'family-1', 'user-1', 'https://a.example.test'));
   FStores.Tokens.Save(NewTokenFor('hash-2', 'family-1', 'user-1', 'https://a.example.test'));
   FStores.Tokens.Save(NewTokenFor('hash-3', 'family-2', 'user-1', 'https://b.example.test'));
@@ -436,6 +497,8 @@ end;
 
 procedure TStoreContractTests.HasActiveFamilyIsFalseAfterDeleteFamily;
 begin
+  RequireStore;
+
   const Resource = 'https://a.example.test';
   FStores.Tokens.Save(NewTokenFor('hash-1', 'family-1', 'user-1', Resource));
   const IsActiveBefore = FStores.Tokens.HasActiveFamily('user-1', Resource);
@@ -449,6 +512,8 @@ end;
 
 procedure TStoreContractTests.DeleteExpiredRemovesOnlyExpired;
 begin
+  RequireStore;
+
   FStores.Tokens.Save(NewToken('expired', 'family-1', 'user-1', IncMinute(BaseTime, 5)));
   FStores.Tokens.Save(NewToken('valid', 'family-2', 'user-1', IncDay(BaseTime, 1)));
 
@@ -462,6 +527,8 @@ end;
 
 procedure TStoreContractTests.ExpiredSessionIsNotFound;
 begin
+  RequireStore;
+
   var Session := Default(TWebSession);
   Session.IdHash := 'session-1';
   Session.UserId := 'user-1';
@@ -476,6 +543,50 @@ begin
 
   Assert.IsTrue(IsFoundBefore);
   Assert.IsFalse(IsFoundAfter);
+end;
+
+procedure TStoreContractTests.ClientRoundTrips;
+begin
+  RequireStore;
+
+  var Expected := Default(TOAuthClient);
+  Expected.ClientId := 'client-1';
+  Expected.ClientName := 'Client One';
+  Expected.RedirectUris := ['https://client.example.test/callback', 'http://127.0.0.1:33418/callback'];
+  Expected.CreatedAtUtc := BaseTime;
+  FStores.Clients.Save(Expected);
+
+  var Actual: TOAuthClient;
+  const IsFound = FStores.Clients.TryGet('client-1', Actual);
+  var Unknown: TOAuthClient;
+  const IsUnknownFound = FStores.Clients.TryGet('client-2', Unknown);
+
+  Assert.IsTrue(IsFound);
+  Assert.IsFalse(IsUnknownFound);
+  Assert.AreEqual(Expected.ClientName, Actual.ClientName);
+  Assert.AreEqual(Expected.CreatedAtUtc, Actual.CreatedAtUtc);
+  Assert.AreEqual<Integer>(2, Length(Actual.RedirectUris));
+  Assert.AreEqual(Expected.RedirectUris[0], Actual.RedirectUris[0]);
+  Assert.AreEqual(Expected.RedirectUris[1], Actual.RedirectUris[1]);
+end;
+
+procedure TStoreContractTests.RemovedSessionIsNotFound;
+begin
+  RequireStore;
+
+  var Session := Default(TWebSession);
+  Session.IdHash := 'session-1';
+  Session.UserId := 'user-1';
+  Session.CsrfToken := 'csrf';
+  Session.ExpiresAtUtc := IncMinute(BaseTime, 30);
+  FStores.Sessions.Put(Session);
+
+  FStores.Sessions.Remove('session-1');
+
+  var Found: TWebSession;
+  const IsFound = FStores.Sessions.TryGet('session-1', Found);
+  Assert.IsFalse(IsFound);
+  Assert.AreEqual(0, FStores.Sessions.DeleteExpired(IncHour(BaseTime, 1)));
 end;
 
 procedure TStoreContractTests.RunWorker(const Worker: Integer);
@@ -530,6 +641,8 @@ end;
 
 procedure TStoreContractTests.ConcurrentSavesAreSafe;
 begin
+  RequireStore;
+
   FStores.Tokens.Save(NewToken(SharedTokenHash, 'family-shared', 'user-shared', IncDay(BaseTime, 1)));
   FConsumeSuccesses := 0;
   FFailures := 0;
