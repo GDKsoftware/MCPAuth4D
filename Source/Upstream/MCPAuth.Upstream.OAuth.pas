@@ -23,6 +23,7 @@ type
 
     function AuthorizationParameters(const State, CodeChallenge, RedirectUri: string): TArray<TPair<string, string>>;
     function ScopeText: string;
+    function RefreshScopeText(const GrantedScopes: TArray<string>): string;
     function RequestTokens(const Fields: TArray<TPair<string, string>>; const IncludesIdentity: Boolean): TUpstreamTokens;
     procedure GuardSuccess(const Response: TUpstreamHttpResponse);
     function ErrorCode(const Body: string): string;
@@ -43,13 +44,14 @@ type
     function GetName: string;
     function AuthorizationUrl(const State, CodeChallenge, RedirectUri: string): string;
     function ExchangeCode(const Code, CodeVerifier, RedirectUri: string): TUpstreamTokens;
-    function Refresh(const RefreshToken: string): TUpstreamTokens;
+    function Refresh(const RefreshToken: string; const Scopes: TArray<string>): TUpstreamTokens;
   end;
 
 implementation
 
 uses
   System.SysUtils,
+  System.StrUtils,
   System.DateUtils,
   MCPAuth.Upstream.Jwt,
   MCPAuth.Upstream.FormEncoding,
@@ -62,6 +64,7 @@ const
   DefaultLifetimeSeconds = 3600;
   MaxErrorCodeLength = 64;
   SafeErrorCodeCharacters = ['a'..'z', '_'];
+  SignInScopes: array[0..3] of string = ('openid', 'profile', 'email', 'offline_access');
 
 resourcestring
   GrantRevoked = 'The %s grant is revoked or expired; the account must be connected again';
@@ -129,15 +132,34 @@ begin
   Result := RequestTokens(Fields, True);
 end;
 
-function TOAuthUpstreamProvider.Refresh(const RefreshToken: string): TUpstreamTokens;
+function TOAuthUpstreamProvider.Refresh(const RefreshToken: string; const Scopes: TArray<string>): TUpstreamTokens;
 begin
   const Fields: TArray<TPair<string, string>> = [
     TPair<string, string>.Create('grant_type', 'refresh_token'),
     TPair<string, string>.Create('refresh_token', RefreshToken),
-    TPair<string, string>.Create('scope', ScopeText)
+    TPair<string, string>.Create('scope', RefreshScopeText(Scopes))
   ];
 
   Result := RequestTokens(Fields, False);
+end;
+
+function TOAuthUpstreamProvider.RefreshScopeText(const GrantedScopes: TArray<string>): string;
+begin
+  // Asking for a scope the account never consented to fails the whole refresh (invalid_grant), so a refresh
+  // asks for the granted scopes only. Sign-in scopes are often left out of a token response and are added back.
+  if Length(GrantedScopes) = 0 then
+    Exit(ScopeText);
+
+  var Requested := GrantedScopes;
+  for var Configured in FSettings.Scopes do
+  begin
+    const IsSignInScope = MatchText(Configured, SignInScopes);
+    const IsRequested = MatchText(Configured, Requested);
+    if IsSignInScope and not IsRequested then
+      Requested := Requested + [Configured];
+  end;
+
+  Result := string.Join(' ', Requested);
 end;
 
 function TOAuthUpstreamProvider.RequestTokens(const Fields: TArray<TPair<string, string>>; const IncludesIdentity: Boolean): TUpstreamTokens;

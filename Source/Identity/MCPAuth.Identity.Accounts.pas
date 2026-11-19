@@ -45,7 +45,7 @@ type
     function RefreshAccessToken(const Account: TLinkedAccount; const Context: string): TUpstreamAccessToken;
     function RequestUpstreamTokens(const Account: TLinkedAccount; const RefreshToken: string): TUpstreamTokens;
     procedure MarkNeedsReconnect(const Account: TLinkedAccount; const Context: string);
-    procedure StoreRefreshedAccount(const Account: TLinkedAccount; const Context, CurrentRefreshToken, NewRefreshToken: string);
+    procedure StoreRefreshedAccount(const Account: TLinkedAccount; const Context, CurrentRefreshToken: string; const Tokens: TUpstreamTokens);
 
   public
     constructor Create(const Users: IUserRepository; const Accounts: ILinkedAccountRepository; const Protector: ISecretProtector; const Policy: IAccessPolicy; const Providers: IUpstreamProviders; const Clock: IClock);
@@ -231,15 +231,20 @@ begin
     Result.LinkedAtUtc := NowUtc;
   end;
 
-  Result.UserId         := UserId;
-  Result.DisplayName    := Tokens.Identity.DisplayName;
-  Result.UserName       := Tokens.Identity.UserName;
-  Result.GrantedScopes  := Tokens.Scope;
-  Result.NeedsReconnect := False;
-  Result.UpdatedAtUtc   := NowUtc;
+  Result.UserId       := UserId;
+  Result.DisplayName  := Tokens.Identity.DisplayName;
+  Result.UserName     := Tokens.Identity.UserName;
+  Result.UpdatedAtUtc := NowUtc;
 
-  // A provider may leave out the refresh token; the stored one then stays valid.
+  // A provider may leave out the refresh token; the stored one then stays, and so do its scopes and
+  // its reconnect flag, which describe that stored token.
   const HasRefreshToken = not Tokens.RefreshToken.IsEmpty;
+  if HasRefreshToken or not IsKnownAccount then
+  begin
+    Result.GrantedScopes  := Tokens.Scope;
+    Result.NeedsReconnect := False;
+  end;
+
   if HasRefreshToken then
   begin
     const Context = RefreshTokenContext(UserId, Key);
@@ -336,7 +341,7 @@ begin
     end;
   end;
 
-  StoreRefreshedAccount(Account, Context, CurrentRefreshToken, Tokens.RefreshToken);
+  StoreRefreshedAccount(Account, Context, CurrentRefreshToken, Tokens);
 
   Result.AccessToken := Tokens.AccessToken;
   Result.ExpiresAtUtc := Tokens.ExpiresAtUtc;
@@ -349,7 +354,8 @@ begin
   if not FProviders.TryGet(Account.Key.Provider, Provider) then
     raise EUpstreamError.Create('The upstream provider of the account is not registered');
 
-  Result := Provider.Refresh(RefreshToken);
+  const GrantedScopes = Account.GrantedScopes.Split([' '], TStringSplitOptions.ExcludeEmpty);
+  Result := Provider.Refresh(RefreshToken, GrantedScopes);
 end;
 
 procedure TLinkedAccounts.MarkNeedsReconnect(const Account: TLinkedAccount; const Context: string);
@@ -362,19 +368,25 @@ begin
   RemoveCachedToken(Context);
 end;
 
-procedure TLinkedAccounts.StoreRefreshedAccount(const Account: TLinkedAccount; const Context, CurrentRefreshToken, NewRefreshToken: string);
+procedure TLinkedAccounts.StoreRefreshedAccount(const Account: TLinkedAccount; const Context, CurrentRefreshToken: string; const Tokens: TUpstreamTokens);
 begin
   // A provider may leave out the refresh token; the current one then stays valid.
-  const HasNewRefreshToken = not NewRefreshToken.IsEmpty;
+  const HasNewRefreshToken = not Tokens.RefreshToken.IsEmpty;
   const IsRewrapNeeded = FProtector.NeedsRewrap(Account.ProtectedRefreshToken);
-  const IsStoreNeeded = (HasNewRefreshToken or IsRewrapNeeded);
+
+  // The response tells which scopes the grant still has; a scope an administrator removed then shows up as missing_scopes.
+  const HasChangedScopes = (not Tokens.Scope.IsEmpty and (Tokens.Scope <> Account.GrantedScopes));
+  const IsStoreNeeded = (HasNewRefreshToken or IsRewrapNeeded or HasChangedScopes);
   if not IsStoreNeeded then
     Exit;
 
   var Updated := Account;
+  if HasChangedScopes then
+    Updated.GrantedScopes := Tokens.Scope;
+
   if HasNewRefreshToken then
   begin
-    Updated.ProtectedRefreshToken := FProtector.Protect(NewRefreshToken, Context);
+    Updated.ProtectedRefreshToken := FProtector.Protect(Tokens.RefreshToken, Context);
   end
   else
   begin

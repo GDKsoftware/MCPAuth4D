@@ -11,7 +11,8 @@ type
     ['{4E0C2B7A-91D3-4F6E-A8B5-3C7D1E9F2A64}']
     function AuthorizationUrl(const State, CodeChallenge, RedirectUri: string): string;
     function ExchangeCode(const Code, CodeVerifier, RedirectUri: string): TUpstreamTokens;
-    function Refresh(const RefreshToken: string): TUpstreamTokens;
+    // Scopes are the scopes the account granted; a refresh never asks for more. Empty means the configured scopes.
+    function Refresh(const RefreshToken: string; const Scopes: TArray<string>): TUpstreamTokens;
 
     function GetName: string;
     property Name: string read GetName;

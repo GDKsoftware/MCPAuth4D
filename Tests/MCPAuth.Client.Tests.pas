@@ -259,7 +259,7 @@ function TClientTests.LinkFakeAccount(const UserId, ObjectId: string): string;
 begin
   EnsureUser(UserId);
   FProvider.SetIdentity(TenantId, ObjectId, 'Display ' + ObjectId, ObjectId + '@example.test');
-  const Tokens = FProvider.Refresh(FProvider.RefreshToken);
+  const Tokens = FProvider.Refresh(FProvider.RefreshToken, []);
   Result := FAccounts.Link(UserId, Tokens).Key.Value;
 end;
 

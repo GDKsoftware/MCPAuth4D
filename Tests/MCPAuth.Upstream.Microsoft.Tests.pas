@@ -46,6 +46,9 @@ type
     procedure RefreshSendsRefreshGrantWithoutIdentity;
 
     [Test]
+    procedure RefreshRequestsOnlyTheGivenScopes;
+
+    [Test]
     procedure RefreshInvalidGrantRaisesGrantRevoked;
 
     [Test]
@@ -112,7 +115,7 @@ begin
   RaisedClass := nil;
   Result      := '';
   try
-    FProvider.Refresh(RefreshToken);
+    FProvider.Refresh(RefreshToken, []);
   except
     on E: EUpstreamError do
     begin
@@ -188,7 +191,7 @@ begin
   const IdToken = TFakeJwt.Unsigned(IdentityClaims);
   FHttp.EnqueueResponse(200, TokenResponseJson(IdToken));
 
-  const Tokens = FProvider.Refresh(RefreshTokenValue);
+  const Tokens = FProvider.Refresh(RefreshTokenValue, []);
 
   Assert.AreEqual(AccessTokenValue, Tokens.AccessToken);
   Assert.AreEqual(NewRefreshTokenValue, Tokens.RefreshToken);
@@ -208,9 +211,19 @@ begin
   Assert.WillRaise(
     procedure
     begin
-      FProvider.Refresh(RefreshTokenValue);
+      FProvider.Refresh(RefreshTokenValue, []);
     end,
     EUpstreamGrantRevoked);
+end;
+
+procedure TMicrosoftUpstreamProviderTests.RefreshRequestsOnlyTheGivenScopes;
+begin
+  FHttp.EnqueueResponse(200, TokenResponseJson(TFakeJwt.Unsigned(IdentityClaims)));
+
+  // A scope that a newer resource added (Calendars.Read) was never consented to by this account.
+  FProvider.Refresh(RefreshTokenValue, ['openid', 'Mail.Read']);
+
+  Assert.AreEqual('openid Mail.Read profile offline_access', FHttp.LastRequest.GetField('scope'));
 end;
 
 procedure TMicrosoftUpstreamProviderTests.ServerErrorRaisesUpstreamErrorWithoutTokens;

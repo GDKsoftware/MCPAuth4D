@@ -44,6 +44,15 @@ type
     procedure TearDown;
 
     [Test]
+    procedure RefreshRequestsTheGrantedScopes;
+
+    [Test]
+    procedure RefreshStoresTheScopeOfTheResponse;
+
+    [Test]
+    procedure SignInWithoutRefreshTokenKeepsReconnectFlagAndScopes;
+
+    [Test]
     procedure FirstLoginCreatesUserAndAccount;
 
     [Test]
@@ -140,6 +149,7 @@ begin
   FStores := TMemoryStore.CreateSet(FClockReference);
   FProvider := TFakeUpstreamProvider.Create(ProviderName);
   FProviderReference := FProvider;
+  FProvider.Scope := AccessTokenScopes;
 
   var Key: TBytes;
   SetLength(Key, KeyLength);
@@ -308,6 +318,44 @@ procedure TLinkedAccountsTests.SetUpstreamToken(const ExpiresInSeconds: Integer;
 begin
   FProvider.ExpiresAtUtc := IncSecond(FClock.NowUtc, ExpiresInSeconds);
   FProvider.RefreshToken := RefreshToken;
+end;
+
+procedure TLinkedAccountsTests.RefreshRequestsTheGrantedScopes;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+  SetUpstreamToken(3600, 'refresh-2');
+
+  FAccounts.GetAccessToken(Account.UserId, Account.Key, ['Mail.Read']);
+
+  Assert.AreEqual(AccessTokenScopes, string.Join(' ', FProvider.LastRefreshScopes));
+end;
+
+procedure TLinkedAccountsTests.RefreshStoresTheScopeOfTheResponse;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+  SetUpstreamToken(3600, 'refresh-2');
+  FProvider.Scope := 'openid offline_access';
+
+  FAccounts.GetAccessToken(Account.UserId, Account.Key, ['Mail.Read']);
+
+  var Stored: TLinkedAccount;
+  FStores.LinkedAccounts.TryFind(Account.Key, Stored);
+  Assert.AreEqual('openid offline_access', Stored.GrantedScopes, 'an administrator removed Mail.Read');
+end;
+
+procedure TLinkedAccountsTests.SignInWithoutRefreshTokenKeepsReconnectFlagAndScopes;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+  var Stored: TLinkedAccount;
+  FStores.LinkedAccounts.TryFind(Account.Key, Stored);
+  Stored.NeedsReconnect := True;
+  FStores.LinkedAccounts.Save(Stored);
+
+  FAccounts.ResolveOrCreateUser(TokensFor('object-1', ''));
+
+  FStores.LinkedAccounts.TryFind(Account.Key, Stored);
+  Assert.IsTrue(Stored.NeedsReconnect, 'the stored refresh token is still the revoked one');
+  Assert.AreEqual(AccessTokenScopes, Stored.GrantedScopes, 'the scopes still describe the stored refresh token');
 end;
 
 procedure TLinkedAccountsTests.CachedTokenIsReusedUntilMargin;

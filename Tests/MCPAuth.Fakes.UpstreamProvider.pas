@@ -25,6 +25,7 @@ type
     FRefreshCount: Integer;
     FRefreshDelayMs: Integer;
     FLastRefreshInput: string;
+    FLastRefreshScopes: TArray<string>;
     FRevoked: Boolean;
 
     function BuildTokens: TUpstreamTokens;
@@ -34,7 +35,7 @@ type
 
     function AuthorizationUrl(const State, CodeChallenge, RedirectUri: string): string;
     function ExchangeCode(const Code, CodeVerifier, RedirectUri: string): TUpstreamTokens;
-    function Refresh(const RefreshToken: string): TUpstreamTokens;
+    function Refresh(const RefreshToken: string; const Scopes: TArray<string>): TUpstreamTokens;
     function GetName: string;
 
     procedure SetIdentity(const TenantId, ObjectId, DisplayName, UserName: string);
@@ -48,6 +49,7 @@ type
     property RefreshCount: Integer read FRefreshCount;
     property RefreshDelayMs: Integer read FRefreshDelayMs write FRefreshDelayMs;
     property LastRefreshInput: string read FLastRefreshInput;
+    property LastRefreshScopes: TArray<string> read FLastRefreshScopes;
     property IsRevoked: Boolean read FRevoked write FRevoked;
   end;
 
@@ -93,13 +95,14 @@ begin
   Result := BuildTokens;
 end;
 
-function TFakeUpstreamProvider.Refresh(const RefreshToken: string): TUpstreamTokens;
+function TFakeUpstreamProvider.Refresh(const RefreshToken: string; const Scopes: TArray<string>): TUpstreamTokens;
 begin
   if FRevoked then
     raise EUpstreamGrantRevoked.Create('The fake provider revoked the grant');
 
   TInterlocked.Increment(FRefreshCount);
   FLastRefreshInput := RefreshToken;
+  FLastRefreshScopes := Scopes;
   Sleep(FRefreshDelayMs);
   Result := BuildTokens;
 end;
