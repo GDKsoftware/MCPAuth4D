@@ -75,6 +75,9 @@ type
     procedure AccountsOfUserWithoutLinkedAccountsAreEmpty;
 
     [Test]
+    procedure AccountsForResourceWithoutConsentAreForbidden;
+
+    [Test]
     procedure UpstreamTokenReturnsAccessToken;
 
     [Test]
@@ -368,6 +371,8 @@ procedure TInternalControllerTests.AccountsAreFilteredByResourceProviders;
 begin
   const FakeKey = LinkFakeAccount(UserOne, 'object-1');
   LinkOtherAccount(UserOne);
+  SaveToken(AccessTokenValue, UserOne, ResourceA, TTokenKind.Access);
+  SaveToken('access-token-b', UserOne, ResourceB, TTokenKind.Access);
 
   const ForA = CallAsA('/internal/accounts', '{"sub":"user-1"}');
   const ForB = CallAsB('/internal/accounts', '{"sub":"user-1"}');
@@ -392,10 +397,23 @@ end;
 
 procedure TInternalControllerTests.AccountsOfUserWithoutLinkedAccountsAreEmpty;
 begin
+  SaveToken(AccessTokenValue, 'nobody', ResourceA, TTokenKind.Access);
+
   const Response = CallAsA('/internal/accounts', '{"sub":"nobody"}');
 
   Assert.AreEqual(StatusOk, Response.StatusCode);
   Assert.AreEqual('[]', Response.Body);
+end;
+
+procedure TInternalControllerTests.AccountsForResourceWithoutConsentAreForbidden;
+begin
+  LinkFakeAccount(UserOne, 'object-1');
+  SaveToken(AccessTokenValue, UserOne, ResourceA, TTokenKind.Access);
+
+  const Response = CallAsB('/internal/accounts', '{"sub":"user-1"}');
+
+  Assert.AreEqual(StatusForbidden, Response.StatusCode);
+  Assert.AreEqual('{"error":"forbidden"}', Response.Body);
 end;
 
 procedure TInternalControllerTests.UpstreamTokenReturnsAccessToken;

@@ -350,6 +350,7 @@ end;
 procedure TClientTests.ListForUserReturnsAccounts;
 begin
   const Key = LinkFakeAccount(UserOne, 'object-1');
+  SaveToken(AccessTokenValue, UserOne, ResourceA);
 
   const Accounts = RemoteAccounts.ListForUser(UserOne);
 

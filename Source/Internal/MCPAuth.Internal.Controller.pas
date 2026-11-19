@@ -287,6 +287,11 @@ begin
     if UserId.IsEmpty then
       Exit(ReplyError(StatusBadRequest, 'invalid_request'));
 
+    // Like the upstream token: a resource only sees the accounts of users who gave it access.
+    const HasConsent = FTokens.HasActiveFamily(UserId, Resource.ResourceUri);
+    if not HasConsent then
+      Exit(ReplyError(StatusForbidden, 'forbidden'));
+
     Result := BuildAccountList(UserId, Resource);
   finally
     Body.Free;
