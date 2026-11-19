@@ -23,6 +23,8 @@ type
 
     function ReadToken(const Command: TFireDACCommand): TIssuedToken;
     procedure DeleteWhere(const Column, Value: string);
+    procedure MarkFamilyRevoked(const FamilyId: string);
+    procedure ForgetOldRevocations(const NowUtc: TDateTime);
 
   public
     constructor Create(const Factory: IFireDACConnectionFactory; const Dialect: TSqlDialect; const Clock: IClock);
@@ -43,6 +45,7 @@ implementation
 
 uses
   System.SysUtils,
+  System.DateUtils,
   MCPAuth.Store.FireDAC.Exceptions;
 
 const
@@ -52,12 +55,20 @@ const
   RefreshText = 'refresh';
 
   SelectConsumedFamily = 'SELECT family_id FROM mcpauth_tokens WHERE hash = :hash AND consumed = true';
-  ActiveTokenCondition = 'consumed = false AND expires_at > :now';
+  // A token of a revoked family is never live, also when a concurrent refresh saved it after the revocation.
+  LiveTokenCondition = 'expires_at > :now AND NOT EXISTS (SELECT 1 FROM mcpauth_revoked_families r WHERE r.family_id = mcpauth_tokens.family_id)';
+  ActiveTokenCondition = 'consumed = false AND ' + LiveTokenCondition;
   SelectActiveFamilies = 'SELECT family_id, user_id, client_id, resource, created_at FROM mcpauth_tokens ' +
                          'WHERE user_id = :user_id AND ' + ActiveTokenCondition + ' ORDER BY family_id, created_at';
   CountActiveForResource = 'SELECT COUNT(*) AS active_count FROM mcpauth_tokens ' +
                            'WHERE user_id = :user_id AND resource = :resource AND ' + ActiveTokenCondition;
   DeleteExpiredTokens = 'DELETE FROM mcpauth_tokens WHERE expires_at <= :now';
+  RevokedFamiliesTable = 'mcpauth_revoked_families';
+  RevokedFamilyColumns: TArray<string> = ['family_id', 'revoked_at'];
+  // A revocation is kept while tokens of the family exist, and at least a day for refreshes still in flight.
+  DeleteOldRevocations = 'DELETE FROM mcpauth_revoked_families r WHERE r.revoked_at <= :cutoff ' +
+                         'AND NOT EXISTS (SELECT 1 FROM mcpauth_tokens t WHERE t.family_id = r.family_id)';
+  RevocationRetentionDays = 1;
 
 { TFireDACTokenRepository }
 
@@ -99,7 +110,7 @@ function TFireDACTokenRepository.TryGet(const Hash: string; out Token: TIssuedTo
 begin
   Token := Default(TIssuedToken);
 
-  const Sql = Format('SELECT %s FROM %s WHERE hash = :hash AND expires_at > :now', [string.Join(', ', Columns), Table]);
+  const Sql = Format('SELECT %s FROM %s WHERE hash = :hash AND %s', [string.Join(', ', Columns), Table, LiveTokenCondition]);
   const Command = TFireDACCommand.Create(FFactory, Sql);
   try
     Command.SetText('hash', Hash);
@@ -179,6 +190,8 @@ end;
 
 procedure TFireDACTokenRepository.DeleteFamily(const FamilyId: string);
 begin
+  // The revocation comes first, so a token saved in between is already excluded.
+  MarkFamilyRevoked(FamilyId);
   DeleteWhere('family_id', FamilyId);
 end;
 
@@ -247,6 +260,8 @@ begin
   finally
     Command.Free;
   end;
+
+  ForgetOldRevocations(NowUtc);
 end;
 
 function TFireDACTokenRepository.ReadToken(const Command: TFireDACCommand): TIssuedToken;
@@ -268,6 +283,29 @@ begin
   const Command = TFireDACCommand.Create(FFactory, Format('DELETE FROM %s WHERE %s = :value', [Table, Column]));
   try
     Command.SetText('value', Value);
+    Command.Execute;
+  finally
+    Command.Free;
+  end;
+end;
+
+procedure TFireDACTokenRepository.MarkFamilyRevoked(const FamilyId: string);
+begin
+  const Command = TFireDACCommand.Create(FFactory, FDialect.Upsert(RevokedFamiliesTable, 'family_id', RevokedFamilyColumns));
+  try
+    Command.SetText('family_id', FamilyId);
+    Command.SetUtc('revoked_at', FClock.NowUtc);
+    Command.Execute;
+  finally
+    Command.Free;
+  end;
+end;
+
+procedure TFireDACTokenRepository.ForgetOldRevocations(const NowUtc: TDateTime);
+begin
+  const Command = TFireDACCommand.Create(FFactory, DeleteOldRevocations);
+  try
+    Command.SetUtc('cutoff', IncDay(NowUtc, -RevocationRetentionDays));
     Command.Execute;
   finally
     Command.Free;

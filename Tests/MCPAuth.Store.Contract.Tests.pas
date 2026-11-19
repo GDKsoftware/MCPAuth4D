@@ -99,6 +99,12 @@ type
     procedure HasActiveFamilyIsFalseAfterDeleteFamily;
 
     [Test]
+    procedure TokensSavedAfterDeleteFamilyStayRevoked;
+
+    [Test]
+    procedure DeleteExpiredForgetsOldRevocationsWithoutTokens;
+
+    [Test]
     procedure DeleteExpiredRemovesOnlyExpired;
 
     [Test]
@@ -510,6 +516,52 @@ begin
   const IsActiveAfter = FStores.Tokens.HasActiveFamily('user-1', Resource);
   Assert.IsTrue(IsActiveBefore);
   Assert.IsFalse(IsActiveAfter);
+end;
+
+procedure TStoreContractTests.TokensSavedAfterDeleteFamilyStayRevoked;
+begin
+  RequireStore;
+
+  // A refresh that won TryConsume saves its new pair after a concurrent reuse already revoked the family.
+  const Resource = 'https://a.example.test';
+  FStores.Tokens.Save(NewTokenFor('hash-1', 'family-1', 'user-1', Resource));
+  var Consumed: TIssuedToken;
+  Assert.IsTrue(FStores.Tokens.TryConsume('hash-1', Consumed), 'winner consumes');
+
+  FStores.Tokens.DeleteFamily('family-1');
+  FStores.Tokens.Save(NewTokenFor('hash-2', 'family-1', 'user-1', Resource));
+  FStores.Tokens.Save(NewTokenFor('hash-3', 'family-2', 'user-1', Resource));
+
+  var Token: TIssuedToken;
+  Assert.IsFalse(FStores.Tokens.TryGet('hash-2', Token), 'late token is not readable');
+  Assert.IsFalse(FStores.Tokens.TryConsume('hash-2', Token), 'late token cannot be refreshed');
+  Assert.IsTrue(FStores.Tokens.TryGet('hash-3', Token), 'other family unaffected');
+
+  const Families = FStores.Tokens.ListFamiliesForUser('user-1');
+  Assert.AreEqual(1, Families.Count);
+  Assert.AreEqual('family-2', Families[0].FamilyId);
+
+  FStores.Tokens.DeleteFamily('family-2');
+  Assert.IsFalse(FStores.Tokens.HasActiveFamily('user-1', Resource), 'no active family left');
+end;
+
+procedure TStoreContractTests.DeleteExpiredForgetsOldRevocationsWithoutTokens;
+begin
+  RequireStore;
+
+  FStores.Tokens.DeleteFamily('family-1');
+  FStores.Tokens.DeleteExpired(IncHour(BaseTime, 1));
+
+  var Token: TIssuedToken;
+  FStores.Tokens.Save(NewToken('hash-1', 'family-1', 'user-1', IncDay(BaseTime, 3)));
+  Assert.IsFalse(FStores.Tokens.TryGet('hash-1', Token), 'a fresh revocation is kept');
+
+  FStores.Tokens.DeleteFamily('family-2');
+  FStores.Tokens.DeleteExpired(IncDay(BaseTime, 2));
+
+  FStores.Tokens.Save(NewToken('hash-2', 'family-2', 'user-1', IncDay(BaseTime, 3)));
+  Assert.IsTrue(FStores.Tokens.TryGet('hash-2', Token), 'a revocation older than a day without tokens is forgotten');
+  Assert.IsFalse(FStores.Tokens.TryGet('hash-1', Token), 'a revocation with tokens left is kept');
 end;
 
 procedure TStoreContractTests.DeleteExpiredRemovesOnlyExpired;

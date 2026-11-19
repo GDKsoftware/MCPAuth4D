@@ -53,8 +53,8 @@ uses
   MCPAuth.Tests.Postgres;
 
 const
-  StoreTables: array[0..6] of string = ('mcpauth_users', 'mcpauth_linked_accounts', 'mcpauth_clients', 'mcpauth_pending_authorizations',
-                                        'mcpauth_grants', 'mcpauth_tokens', 'mcpauth_sessions');
+  StoreTables: array[0..7] of string = ('mcpauth_users', 'mcpauth_linked_accounts', 'mcpauth_clients', 'mcpauth_pending_authorizations',
+                                        'mcpauth_grants', 'mcpauth_tokens', 'mcpauth_sessions', 'mcpauth_revoked_families');
   VersionTable = 'mcpauth_schema_version';
   UtcTokenHash = 'utc-token';
   // 2026-06-01 12:00:00 UTC

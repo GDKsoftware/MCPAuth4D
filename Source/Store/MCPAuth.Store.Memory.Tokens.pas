@@ -17,9 +17,13 @@ type
     FClock: IClock;
     FLock: TCriticalSection;
     FTokens: IDictionary<string, TIssuedToken>;
+    FRevokedFamilies: IDictionary<string, TDateTime>;
 
     function IsActive(const Token: TIssuedToken): Boolean;
+    function IsLive(const Token: TIssuedToken): Boolean;
     procedure RemoveWhere(const IsRemoved: TTokenPredicate);
+    procedure ForgetOldRevocations(const NowUtc: TDateTime);
+    function HasTokensInFamily(const FamilyId: string): Boolean;
 
   public
     constructor Create(const Clock: IClock);
@@ -40,7 +44,12 @@ type
 implementation
 
 uses
-  System.SysUtils;
+  System.SysUtils,
+  System.DateUtils;
+
+const
+  // A revocation is kept while tokens of the family exist, and at least this long for refreshes still in flight.
+  RevocationRetentionDays = 1;
 
 { TMemoryTokenRepository }
 
@@ -50,6 +59,7 @@ begin
   FClock := Clock;
   FLock := TCriticalSection.Create;
   FTokens := TCollections.CreateDictionary<string, TIssuedToken>;
+  FRevokedFamilies := TCollections.CreateDictionary<string, TDateTime>;
 end;
 
 destructor TMemoryTokenRepository.Destroy;
@@ -63,7 +73,7 @@ begin
   FLock.Enter;
   try
     const IsFound = FTokens.TryGetValue(Hash, Token);
-    Result := (IsFound and (Token.ExpiresAtUtc > FClock.NowUtc));
+    Result := (IsFound and IsLive(Token));
   finally
     FLock.Leave;
   end;
@@ -84,7 +94,7 @@ begin
   FLock.Enter;
   try
     const IsFound = FTokens.TryGetValue(Hash, Token);
-    const IsConsumable = (IsFound and not Token.Consumed and (Token.ExpiresAtUtc > FClock.NowUtc));
+    const IsConsumable = (IsFound and IsActive(Token));
     if IsConsumable then
     begin
       var Consumed := Token;
@@ -121,6 +131,7 @@ procedure TMemoryTokenRepository.DeleteFamily(const FamilyId: string);
 begin
   FLock.Enter;
   try
+    FRevokedFamilies[FamilyId] := FClock.NowUtc;
     RemoveWhere(
       function(const Token: TIssuedToken): Boolean
       begin
@@ -206,6 +217,8 @@ begin
         Result := (Token.ExpiresAtUtc <= NowUtc);
       end);
     Result := CountBefore - FTokens.Count;
+
+    ForgetOldRevocations(NowUtc);
   finally
     FLock.Leave;
   end;
@@ -213,7 +226,15 @@ end;
 
 function TMemoryTokenRepository.IsActive(const Token: TIssuedToken): Boolean;
 begin
-  Result := (not Token.Consumed and (Token.ExpiresAtUtc > FClock.NowUtc));
+  Result := (not Token.Consumed and IsLive(Token));
+end;
+
+function TMemoryTokenRepository.IsLive(const Token: TIssuedToken): Boolean;
+begin
+  // A token of a revoked family is never live, also when a concurrent refresh saved it after the revocation.
+  const IsRevoked = FRevokedFamilies.ContainsKey(Token.FamilyId);
+
+  Result := ((Token.ExpiresAtUtc > FClock.NowUtc) and not IsRevoked);
 end;
 
 procedure TMemoryTokenRepository.RemoveWhere(const IsRemoved: TTokenPredicate);
@@ -231,6 +252,34 @@ begin
   begin
     FTokens.Remove(Hash);
   end;
+end;
+
+procedure TMemoryTokenRepository.ForgetOldRevocations(const NowUtc: TDateTime);
+begin
+  const CutoffUtc = IncDay(NowUtc, -RevocationRetentionDays);
+  const ForgottenFamilies = TCollections.CreateList<string>;
+  for var Revocation in FRevokedFamilies do
+  begin
+    const IsForgettable = ((Revocation.Value <= CutoffUtc) and not HasTokensInFamily(Revocation.Key));
+    if IsForgettable then
+    begin
+      ForgottenFamilies.Add(Revocation.Key);
+    end;
+  end;
+
+  for var FamilyId in ForgottenFamilies do
+  begin
+    FRevokedFamilies.Remove(FamilyId);
+  end;
+end;
+
+function TMemoryTokenRepository.HasTokensInFamily(const FamilyId: string): Boolean;
+begin
+  Result := FTokens.Values.Any(
+    function(const Token: TIssuedToken): Boolean
+    begin
+      Result := (Token.FamilyId = FamilyId);
+    end);
 end;
 
 end.
