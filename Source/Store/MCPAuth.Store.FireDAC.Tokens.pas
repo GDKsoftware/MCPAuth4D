@@ -66,8 +66,8 @@ const
   RevokedFamiliesTable = 'mcpauth_revoked_families';
   RevokedFamilyColumns: TArray<string> = ['family_id', 'revoked_at'];
   // A revocation is kept while tokens of the family exist, and at least a day for refreshes still in flight.
-  DeleteOldRevocations = 'DELETE FROM mcpauth_revoked_families r WHERE r.revoked_at <= :cutoff ' +
-                         'AND NOT EXISTS (SELECT 1 FROM mcpauth_tokens t WHERE t.family_id = r.family_id)';
+  DeleteOldRevocations = 'DELETE FROM mcpauth_revoked_families WHERE revoked_at <= :cutoff ' +
+                         'AND NOT EXISTS (SELECT 1 FROM mcpauth_tokens t WHERE t.family_id = mcpauth_revoked_families.family_id)';
   RevocationRetentionDays = 1;
 
 { TFireDACTokenRepository }
