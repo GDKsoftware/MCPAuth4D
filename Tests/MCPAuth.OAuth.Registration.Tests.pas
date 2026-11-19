@@ -57,6 +57,12 @@ type
     procedure RedirectUrisThatAreNotStringsFail;
 
     [Test]
+    procedure TooManyRedirectUrisFail;
+
+    [Test]
+    procedure TooLongRedirectUriFails;
+
+    [Test]
     procedure IssuedAtIsUnixSecondsFromClock;
   end;
 
@@ -185,6 +191,26 @@ begin
   finally
     Response.Free;
   end;
+end;
+
+procedure TClientRegistrationTests.TooManyRedirectUrisFail;
+begin
+  var Uris: TArray<string> := [];
+  for var Index := 1 to 10 do
+  begin
+    Uris := Uris + [Format('"http://localhost:%d/callback"', [7000 + Index])];
+  end;
+  RegisterJson(Format('{"redirect_uris":[%s]}', [string.Join(',', Uris)])).Free;
+
+  Uris := Uris + ['"http://localhost:7011/callback"'];
+  AssertRejected(Format('{"redirect_uris":[%s]}', [string.Join(',', Uris)]), TOAuthErrorCode.InvalidRedirectUri);
+end;
+
+procedure TClientRegistrationTests.TooLongRedirectUriFails;
+begin
+  const LongUri = 'http://localhost:7000/' + StringOfChar('a', 2048);
+
+  AssertRejected(Format('{"redirect_uris":["%s"]}', [LongUri]), TOAuthErrorCode.InvalidRedirectUri);
 end;
 
 procedure TClientRegistrationTests.RedirectUrisThatAreNotStringsFail;

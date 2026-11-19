@@ -81,6 +81,12 @@ type
     procedure ExpiredGrantIsNotTaken;
 
     [Test]
+    procedure DeleteExpiredRemovesOnlyExpiredPending;
+
+    [Test]
+    procedure DeleteExpiredRemovesOnlyExpiredGrants;
+
+    [Test]
     procedure RefreshTokenIsConsumedOnce;
 
     [Test]
@@ -400,6 +406,36 @@ begin
   Assert.IsFalse(CanTakeAgain);
   Assert.AreEqual('user-1', Taken.UserId);
   Assert.AreEqual('challenge', Taken.CodeChallenge);
+end;
+
+procedure TStoreContractTests.DeleteExpiredRemovesOnlyExpiredPending;
+begin
+  RequireStore;
+
+  FStores.Pending.Put(NewPending('expired', IncMinute(BaseTime, 5)));
+  FStores.Pending.Put(NewPending('valid', IncMinute(BaseTime, 20)));
+
+  const Removed = FStores.Pending.DeleteExpired(IncMinute(BaseTime, 10));
+
+  Assert.AreEqual(1, Removed);
+  var Pending: TPendingAuthorization;
+  Assert.IsTrue(FStores.Pending.TryGet('valid', Pending));
+  Assert.AreEqual(0, FStores.Pending.DeleteExpired(IncMinute(BaseTime, 10)));
+end;
+
+procedure TStoreContractTests.DeleteExpiredRemovesOnlyExpiredGrants;
+begin
+  RequireStore;
+
+  FStores.Grants.Put(NewGrant('expired', IncMinute(BaseTime, 5)));
+  FStores.Grants.Put(NewGrant('valid', IncMinute(BaseTime, 20)));
+
+  const Removed = FStores.Grants.DeleteExpired(IncMinute(BaseTime, 10));
+
+  Assert.AreEqual(1, Removed);
+  var Grant: TAuthorizationGrant;
+  Assert.IsTrue(FStores.Grants.TryTake('valid', Grant));
+  Assert.AreEqual(0, FStores.Grants.DeleteExpired(IncMinute(BaseTime, 10)));
 end;
 
 procedure TStoreContractTests.ExpiredGrantIsNotTaken;

@@ -28,6 +28,7 @@ type
     procedure Put(const Pending: TPendingAuthorization);
     function TryGet(const Id: string; out Pending: TPendingAuthorization): Boolean;
     function TryTake(const Id: string; out Pending: TPendingAuthorization): Boolean;
+    function DeleteExpired(const NowUtc: TDateTime): Integer;
   end;
 
 implementation
@@ -146,6 +147,17 @@ begin
       Pending := ReadPending(Command);
     end;
     Result := (IsFound and (Pending.ExpiresAtUtc > FClock.NowUtc));
+  finally
+    Command.Free;
+  end;
+end;
+
+function TFireDACPendingAuthorizationStore.DeleteExpired(const NowUtc: TDateTime): Integer;
+begin
+  const Command = TFireDACCommand.Create(FFactory, Format('DELETE FROM %s WHERE expires_at <= :now', [Table]));
+  try
+    Command.SetUtc('now', NowUtc);
+    Result := Command.Execute;
   finally
     Command.Free;
   end;

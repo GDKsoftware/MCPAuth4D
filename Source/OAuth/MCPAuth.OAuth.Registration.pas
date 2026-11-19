@@ -44,6 +44,8 @@ uses
 
 const
   MaxClientNameLength = 100;
+  MaxRedirectUris = 10;
+  MaxRedirectUriLength = 2000;
   PublicClientAuthMethod = 'none';
   CodeGrant = 'authorization_code';
   RefreshGrant = 'refresh_token';
@@ -97,11 +99,17 @@ begin
   if not HasUris then
     raise EOAuthError.Create(TOAuthErrorCode.InvalidRedirectUri, 'redirect_uris must be a non-empty array');
 
+  // Registration is open to anyone, so a single client may not store an unbounded amount of data.
+  const HasTooManyUris = (Items.Count > MaxRedirectUris);
+  if HasTooManyUris then
+    raise EOAuthError.Create(TOAuthErrorCode.InvalidRedirectUri, Format('redirect_uris may hold at most %d URIs', [MaxRedirectUris]));
+
   Result := nil;
   for var Item in Items do
   begin
     const IsString = (Item is TJSONString);
-    if not IsString or not FPolicy.IsAllowed(Item.Value) then
+    const IsTooLong = (IsString and (Item.Value.Length > MaxRedirectUriLength));
+    if not IsString or IsTooLong or not FPolicy.IsAllowed(Item.Value) then
       raise EOAuthError.Create(TOAuthErrorCode.InvalidRedirectUri, 'A redirect URI is not allowed');
 
     Result := Result + [Item.Value];

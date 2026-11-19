@@ -23,6 +23,7 @@ type
     procedure Put(const Pending: TPendingAuthorization);
     function TryGet(const Id: string; out Pending: TPendingAuthorization): Boolean;
     function TryTake(const Id: string; out Pending: TPendingAuthorization): Boolean;
+    function DeleteExpired(const NowUtc: TDateTime): Integer;
   end;
 
 implementation
@@ -74,6 +75,29 @@ begin
       FPending.Remove(Id);
     end;
     Result := (IsFound and (Pending.ExpiresAtUtc > FClock.NowUtc));
+  finally
+    FLock.Leave;
+  end;
+end;
+
+function TMemoryPendingAuthorizationStore.DeleteExpired(const NowUtc: TDateTime): Integer;
+begin
+  FLock.Enter;
+  try
+    const ExpiredIds = TCollections.CreateList<string>;
+    for var Entry in FPending do
+    begin
+      if Entry.Value.ExpiresAtUtc <= NowUtc then
+      begin
+        ExpiredIds.Add(Entry.Key);
+      end;
+    end;
+
+    for var Id in ExpiredIds do
+    begin
+      FPending.Remove(Id);
+    end;
+    Result := ExpiredIds.Count;
   finally
     FLock.Leave;
   end;

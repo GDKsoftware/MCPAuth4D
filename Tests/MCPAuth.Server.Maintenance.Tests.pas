@@ -36,6 +36,9 @@ type
     procedure MaintenanceDeletesExpiredSessions;
 
     [Test]
+    procedure MaintenanceDeletesExpiredPendingAndGrants;
+
+    [Test]
     procedure MaintenanceRunsOnItsInterval;
 
     [Test]
@@ -122,7 +125,7 @@ procedure TServerMaintenanceTests.MaintenanceDeletesExpiredTokens;
 begin
   SaveToken('expired', OneMinute);
   SaveToken('valid', OneHour);
-  const Maintenance = TServerMaintenance.Create(FStores.Tokens, FStores.Sessions, FClockReference);
+  const Maintenance = TServerMaintenance.Create(FStores, FClockReference);
   try
     FClock.AdvanceSeconds(TwoMinutes);
 
@@ -139,7 +142,7 @@ procedure TServerMaintenanceTests.MaintenanceDeletesExpiredSessions;
 begin
   SaveSession('expired', OneMinute);
   SaveSession('valid', OneHour);
-  const Maintenance = TServerMaintenance.Create(FStores.Tokens, FStores.Sessions, FClockReference);
+  const Maintenance = TServerMaintenance.Create(FStores, FClockReference);
   try
     FClock.AdvanceSeconds(TwoMinutes);
 
@@ -152,11 +155,36 @@ begin
   end;
 end;
 
+procedure TServerMaintenanceTests.MaintenanceDeletesExpiredPendingAndGrants;
+begin
+  var Pending := Default(TPendingAuthorization);
+  Pending.Id           := 'pending-1';
+  Pending.ExpiresAtUtc := IncSecond(FStartUtc, OneMinute);
+  FStores.Pending.Put(Pending);
+
+  var Grant := Default(TAuthorizationGrant);
+  Grant.CodeHash     := 'code-1';
+  Grant.ExpiresAtUtc := IncSecond(FStartUtc, OneMinute);
+  FStores.Grants.Put(Grant);
+
+  const Maintenance = TServerMaintenance.Create(FStores, FClockReference);
+  try
+    FClock.AdvanceSeconds(TwoMinutes);
+
+    Maintenance.RunOnce;
+
+    Assert.AreEqual(0, FStores.Pending.DeleteExpired(FClock.NowUtc), 'pending already deleted');
+    Assert.AreEqual(0, FStores.Grants.DeleteExpired(FClock.NowUtc), 'grant already deleted');
+  finally
+    Maintenance.Free;
+  end;
+end;
+
 procedure TServerMaintenanceTests.MaintenanceRunsOnItsInterval;
 begin
   SaveToken('expired', OneMinute);
   FClock.AdvanceSeconds(TwoMinutes);
-  const Maintenance = TServerMaintenance.Create(FStores.Tokens, FStores.Sessions, FClockReference, ShortIntervalMs);
+  const Maintenance = TServerMaintenance.Create(FStores, FClockReference, ShortIntervalMs);
   try
     Maintenance.Start;
 
@@ -176,7 +204,7 @@ end;
 
 procedure TServerMaintenanceTests.MaintenanceStopsPromptly;
 begin
-  const Maintenance = TServerMaintenance.Create(FStores.Tokens, FStores.Sessions, FClockReference);
+  const Maintenance = TServerMaintenance.Create(FStores, FClockReference);
   try
     Maintenance.Start;
     Sleep(WaitStepMs);

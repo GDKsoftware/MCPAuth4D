@@ -11,12 +11,11 @@ uses
   MCPAuth.Store.Interfaces;
 
 type
-  // Deletes expired tokens and sessions on a background thread, once per interval.
+  // Deletes expired tokens, sessions, pending sign-ins and authorization codes on a background thread, once per interval.
   // Stop wakes the thread, so it ends within the time of one running cleanup.
   TServerMaintenance = class
   private
-    FTokens: ITokenRepository;
-    FSessions: ISessionStore;
+    FStores: TStoreSet;
     FClock: IClock;
     FIntervalMs: Cardinal;
     FStopEvent: TEvent;
@@ -29,7 +28,7 @@ type
   public
     const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
 
-    constructor Create(const Tokens: ITokenRepository; const Sessions: ISessionStore; const Clock: IClock; const IntervalMs: Cardinal = DEFAULT_INTERVAL_MS);
+    constructor Create(const Stores: TStoreSet; const Clock: IClock; const IntervalMs: Cardinal = DEFAULT_INTERVAL_MS);
     destructor Destroy; override;
 
     procedure Start;
@@ -45,16 +44,15 @@ uses
 
 const
   CleanupFailedFormat = 'Maintenance failed with %s';
-  CleanupDoneFormat = 'Maintenance deleted %d expired tokens and %d expired sessions';
+  CleanupDoneFormat = 'Maintenance deleted %d expired tokens, %d sessions, %d pending sign-ins and %d authorization codes';
 
 { TServerMaintenance }
 
-constructor TServerMaintenance.Create(const Tokens: ITokenRepository; const Sessions: ISessionStore; const Clock: IClock; const IntervalMs: Cardinal);
+constructor TServerMaintenance.Create(const Stores: TStoreSet; const Clock: IClock; const IntervalMs: Cardinal);
 begin
   inherited Create;
 
-  FTokens := Tokens;
-  FSessions := Sessions;
+  FStores := Stores;
   FClock := Clock;
   FIntervalMs := IntervalMs;
   FStopEvent := TEvent.Create(nil, True, False, '');
@@ -112,11 +110,13 @@ procedure TServerMaintenance.RunOnce;
 begin
   const NowUtc = FClock.NowUtc;
 
-  const DeletedTokens = FTokens.DeleteExpired(NowUtc);
-  const DeletedSessions = FSessions.DeleteExpired(NowUtc);
+  const DeletedTokens = FStores.Tokens.DeleteExpired(NowUtc);
+  const DeletedSessions = FStores.Sessions.DeleteExpired(NowUtc);
+  const DeletedPending = FStores.Pending.DeleteExpired(NowUtc);
+  const DeletedGrants = FStores.Grants.DeleteExpired(NowUtc);
 
   TInterlocked.Increment(FRunCount);
-  TLogger.Info(CleanupDoneFormat, [DeletedTokens, DeletedSessions]);
+  TLogger.Info(CleanupDoneFormat, [DeletedTokens, DeletedSessions, DeletedPending, DeletedGrants]);
 end;
 
 function TServerMaintenance.RunCount: Integer;

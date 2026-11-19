@@ -20,12 +20,18 @@ type
     // An expired entry counts as absent.
     function TryGet(const Id: string; out Pending: TPendingAuthorization): Boolean;
     function TryTake(const Id: string; out Pending: TPendingAuthorization): Boolean;
+
+    // Returns the number of deleted entries.
+    function DeleteExpired(const NowUtc: TDateTime): Integer;
   end;
 
   IGrantStore = interface
     ['{4F60B9D2-E87A-4C13-A5D0-18B3C7E9F246}']
     procedure Put(const Grant: TAuthorizationGrant);
     function TryTake(const CodeHash: string; out Grant: TAuthorizationGrant): Boolean;
+
+    // Returns the number of deleted codes.
+    function DeleteExpired(const NowUtc: TDateTime): Integer;
   end;
 
   ITokenRepository = interface

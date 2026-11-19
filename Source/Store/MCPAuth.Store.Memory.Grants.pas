@@ -22,6 +22,7 @@ type
 
     procedure Put(const Grant: TAuthorizationGrant);
     function TryTake(const CodeHash: string; out Grant: TAuthorizationGrant): Boolean;
+    function DeleteExpired(const NowUtc: TDateTime): Integer;
   end;
 
 implementation
@@ -62,6 +63,29 @@ begin
       FGrants.Remove(CodeHash);
     end;
     Result := (IsFound and (Grant.ExpiresAtUtc > FClock.NowUtc));
+  finally
+    FLock.Leave;
+  end;
+end;
+
+function TMemoryGrantStore.DeleteExpired(const NowUtc: TDateTime): Integer;
+begin
+  FLock.Enter;
+  try
+    const ExpiredCodes = TCollections.CreateList<string>;
+    for var Entry in FGrants do
+    begin
+      if Entry.Value.ExpiresAtUtc <= NowUtc then
+      begin
+        ExpiredCodes.Add(Entry.Key);
+      end;
+    end;
+
+    for var CodeHash in ExpiredCodes do
+    begin
+      FGrants.Remove(CodeHash);
+    end;
+    Result := ExpiredCodes.Count;
   finally
     FLock.Leave;
   end;

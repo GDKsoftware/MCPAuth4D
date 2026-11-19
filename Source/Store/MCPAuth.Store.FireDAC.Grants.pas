@@ -21,6 +21,7 @@ type
 
     procedure Put(const Grant: TAuthorizationGrant);
     function TryTake(const CodeHash: string; out Grant: TAuthorizationGrant): Boolean;
+    function DeleteExpired(const NowUtc: TDateTime): Integer;
   end;
 
 implementation
@@ -85,6 +86,17 @@ begin
       Grant.ExpiresAtUtc := Command.Utc('expires_at');
     end;
     Result := (IsFound and (Grant.ExpiresAtUtc > FClock.NowUtc));
+  finally
+    Command.Free;
+  end;
+end;
+
+function TFireDACGrantStore.DeleteExpired(const NowUtc: TDateTime): Integer;
+begin
+  const Command = TFireDACCommand.Create(FFactory, Format('DELETE FROM %s WHERE expires_at <= :now', [Table]));
+  try
+    Command.SetUtc('now', NowUtc);
+    Result := Command.Execute;
   finally
     Command.Free;
   end;

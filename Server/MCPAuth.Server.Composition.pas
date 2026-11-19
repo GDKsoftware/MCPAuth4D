@@ -207,7 +207,7 @@ begin
   BuildRouters;
   StartListeners;
 
-  FMaintenance := TServerMaintenance.Create(FStores.Tokens, FStores.Sessions, FClock);
+  FMaintenance := TServerMaintenance.Create(FStores, FClock);
   FMaintenance.Start;
 
   FIsRunning := True;
