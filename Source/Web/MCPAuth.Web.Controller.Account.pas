@@ -50,8 +50,9 @@ type
 
     function ShowAccount(const Request: TWebRequest; const Session: TWebSession): TWebResponse;
     function BuildAccountModel(const Session: TWebSession): TAccountPageModel;
-    function BuildAccountRows(const UserId: string): TArray<TAccountRow>;
-    function BuildGrantRows(const UserId: string): TArray<TGrantRow>;
+    procedure FreeAccountModel(const Model: TAccountPageModel);
+    procedure BuildAccountRows(const Model: TAccountPageModel; const UserId: string);
+    procedure BuildGrantRows(const Model: TAccountPageModel; const UserId: string);
     function ResourceNameOf(const ResourceUri: string): string;
     function ClientNameOf(const ClientId: string): string;
     function UserDisplayNameOf(const UserId: string): string;
@@ -281,52 +282,61 @@ begin
   try
     Result := Page(StatusOk, AccountTemplate, Model);
   finally
-    for var Row in Model.Accounts do
-      Row.Free;
-
-    for var Row in Model.Grants do
-      Row.Free;
-
-    Model.Free;
+    FreeAccountModel(Model);
   end;
 end;
 
 function TAccountController.BuildAccountModel(const Session: TWebSession): TAccountPageModel;
 begin
+  // The rows are filled one by one, so a failing store call leaves the rows built so far in the model.
   Result := TAccountPageModel.Create;
-  Result.Title           := AccountTitle;
-  Result.Csrf            := Session.CsrfToken;
-  Result.UserDisplayName := UserDisplayNameOf(Session.UserId);
-  Result.Providers       := FProviders.Names;
-  Result.Accounts        := BuildAccountRows(Session.UserId);
-  Result.Grants          := BuildGrantRows(Session.UserId);
+  try
+    Result.Title           := AccountTitle;
+    Result.Csrf            := Session.CsrfToken;
+    Result.UserDisplayName := UserDisplayNameOf(Session.UserId);
+    Result.Providers       := FProviders.Names;
+    BuildAccountRows(Result, Session.UserId);
+    BuildGrantRows(Result, Session.UserId);
+  except
+    FreeAccountModel(Result);
+    raise;
+  end;
 end;
 
-function TAccountController.BuildAccountRows(const UserId: string): TArray<TAccountRow>;
+procedure TAccountController.FreeAccountModel(const Model: TAccountPageModel);
 begin
-  Result := [];
+  for var Row in Model.Accounts do
+    Row.Free;
+
+  for var Row in Model.Grants do
+    Row.Free;
+
+  Model.Free;
+end;
+
+procedure TAccountController.BuildAccountRows(const Model: TAccountPageModel; const UserId: string);
+begin
   for var Account in FAccounts.ListForUser(UserId) do
   begin
     const Row = TAccountRow.Create;
+    Model.Accounts := Model.Accounts + [Row];
     Row.Key            := Account.Key.Value;
     Row.DisplayName    := Account.DisplayName;
     Row.UserName       := Account.UserName;
     Row.NeedsReconnect := Account.NeedsReconnect;
-    Result := Result + [Row];
   end;
 end;
 
-function TAccountController.BuildGrantRows(const UserId: string): TArray<TGrantRow>;
+procedure TAccountController.BuildGrantRows(const Model: TAccountPageModel; const UserId: string);
 begin
-  Result := [];
   for var Family in FStores.Tokens.ListFamiliesForUser(UserId) do
   begin
     const Row = TGrantRow.Create;
+    Model.Grants := Model.Grants + [Row];
     Row.FamilyId     := Family.FamilyId;
     Row.ResourceName := ResourceNameOf(Family.Resource);
     Row.ClientName   := ClientNameOf(Family.ClientId);
     Row.CreatedAt    := IsoUtc(Family.CreatedAtUtc);
-    Result := Result + [Row];
   end;
 end;
 
