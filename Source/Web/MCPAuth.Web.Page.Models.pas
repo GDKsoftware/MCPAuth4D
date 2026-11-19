@@ -79,6 +79,14 @@ type
     property Providers: TArray<string> read FProviders write FProviders;
   end;
 
+  TLoginPageModel = class(TPageModel)
+  private
+    FProviders: TArray<string>;
+
+  public
+    property Providers: TArray<string> read FProviders write FProviders;
+  end;
+
   TErrorPageModel = class(TPageModel)
   private
     FMessage: string;

@@ -395,7 +395,7 @@ end;
 
 procedure TWebStencilsPageRendererTests.DefaultTemplatesHaveNoExternalResources;
 begin
-  for var Template in ['layout.html', 'consent.html', 'account.html', 'error.html', 'done.html'] do
+  for var Template in ['layout.html', 'consent.html', 'account.html', 'error.html', 'done.html', 'login.html'] do
   begin
     const Source = TFile.ReadAllText(TPath.Combine(FLibraryPath, Template), TEncoding.UTF8);
 

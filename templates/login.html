@@ -1,0 +1,13 @@
+@LayoutPage layout.html
+<section class="card">
+  <h1>Sign in</h1>
+  <p>Choose the account provider you want to sign in with.</p>
+  <div class="actions">
+@foreach (var provider in providers) {
+    <form method="get" action="/login">
+      <input type="hidden" name="provider" value="@provider.Name">
+      <button type="submit" class="primary">Sign in with @provider.Name</button>
+    </form>
+}
+  </div>
+</section>

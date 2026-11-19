@@ -63,7 +63,8 @@ uses
   MCPAuth.Identity.Exceptions,
   MCPAuth.Upstream.Exceptions,
   MCPAuth.Upstream.Types,
-  MCPAuth.Secret.Hash;
+  MCPAuth.Secret.Hash,
+  MCPAuth.Web.ErrorLog;
 
 const
   PostMethod = 'POST';
@@ -234,8 +235,11 @@ begin
   except
     on EUpstreamError do
       Result := ReplyError(StatusBadGateway, 'upstream_error');
-    on Exception do
+    on E: Exception do
+    begin
+      TWebErrorLog.Unexpected(E, Request.Path);
       Result := ReplyError(StatusServerError, 'server_error');
+    end;
   end;
 end;
 

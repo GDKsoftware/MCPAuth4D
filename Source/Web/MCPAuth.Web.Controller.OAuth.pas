@@ -93,7 +93,8 @@ uses
   MCPAuth.Identity.Exceptions,
   MCPAuth.Upstream.Exceptions,
   MCPAuth.Upstream.FormEncoding,
-  MCPAuth.OAuth.Metadata;
+  MCPAuth.OAuth.Metadata,
+  MCPAuth.Web.ErrorLog;
 
 const
   StatusOk = 200;
@@ -269,8 +270,11 @@ begin
       try
         Result := Handler(Request);
       except
-        on Exception do
+        on E: Exception do
+        begin
+          TWebErrorLog.Unexpected(E, Request.Path);
           Result := ErrorPage(StatusInternalServerError, ServerErrorMessage);
+        end;
       end;
     end;
 end;
@@ -283,8 +287,11 @@ begin
       try
         Result := Handler(Request);
       except
-        on Exception do
+        on E: Exception do
+        begin
+          TWebErrorLog.Unexpected(E, Request.Path);
           Result := WithNoStore(TWebResponse.Error(StatusInternalServerError, ServerErrorCode, ''));
+        end;
       end;
     end;
 end;

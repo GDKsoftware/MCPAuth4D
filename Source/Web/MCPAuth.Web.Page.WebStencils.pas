@@ -21,6 +21,7 @@ type
     function IsPlainFileName(const Template: string): Boolean;
     procedure AddListVariables(const Processor: TWebStencilsProcessor; const Model: TObject; const Lists: IList<TObjectList>);
     procedure AddAccountLists(const Processor: TWebStencilsProcessor; const Model: TObject; const Lists: IList<TObjectList>);
+    procedure AddProviderList(const Processor: TWebStencilsProcessor; const Providers: TArray<string>; const Lists: IList<TObjectList>);
     procedure HandleFile(Sender: TObject; const FileName: string; var Text: string; var Handled: Boolean);
     procedure HandleError(Sender: TObject; const Message: string);
 
@@ -111,6 +112,9 @@ procedure TWebStencilsPageRenderer.AddListVariables(const Processor: TWebStencil
 begin
   if Model is TAccountPageModel then
     AddAccountLists(Processor, Model, Lists);
+
+  if Model is TLoginPageModel then
+    AddProviderList(Processor, TLoginPageModel(Model).Providers, Lists);
 end;
 
 procedure TWebStencilsPageRenderer.AddAccountLists(const Processor: TWebStencilsProcessor; const Model: TObject; const Lists: IList<TObjectList>);
@@ -129,11 +133,16 @@ begin
     Grants.Add(Grant);
   Processor.AddVar('grants', Grants, False);
 
-  const Providers = TObjectList.Create(True);
-  Lists.Add(Providers);
-  for var Provider in AccountModel.Providers do
-    Providers.Add(TProviderRow.Create(Provider));
-  Processor.AddVar('providers', Providers, False);
+  AddProviderList(Processor, AccountModel.Providers, Lists);
+end;
+
+procedure TWebStencilsPageRenderer.AddProviderList(const Processor: TWebStencilsProcessor; const Providers: TArray<string>; const Lists: IList<TObjectList>);
+begin
+  const Rows = TObjectList.Create(True);
+  Lists.Add(Rows);
+  for var Provider in Providers do
+    Rows.Add(TProviderRow.Create(Provider));
+  Processor.AddVar('providers', Rows, False);
 end;
 
 procedure TWebStencilsPageRenderer.HandleFile(Sender: TObject; const FileName: string; var Text: string; var Handled: Boolean);
