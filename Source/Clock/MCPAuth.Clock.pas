@@ -21,7 +21,8 @@ uses
 
 function TSystemClock.NowUtc: TDateTime;
 begin
-  Result := TTimeZone.Local.ToUniversalTime(Now);
+  // Read from the UTC clock of the OS: converting local time is ambiguous in the hour a DST change repeats.
+  Result := TDateTime.NowUTC;
 end;
 
 end.

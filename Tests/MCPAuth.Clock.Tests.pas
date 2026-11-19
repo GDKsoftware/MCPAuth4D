@@ -33,7 +33,7 @@ begin
 
   const Actual = Clock.NowUtc;
 
-  const ExpectedUtc = TTimeZone.Local.ToUniversalTime(Now);
+  const ExpectedUtc = TDateTime.NowUTC;
   Assert.IsTrue(SecondsBetween(ExpectedUtc, Actual) <= 2);
 end;
 
