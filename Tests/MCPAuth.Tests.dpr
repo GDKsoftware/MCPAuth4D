@@ -11,7 +11,15 @@ uses
   MCPAuth.Secret.Token.Tests in 'MCPAuth.Secret.Token.Tests.pas',
   MCPAuth.Secret.Hash.Tests in 'MCPAuth.Secret.Hash.Tests.pas',
   MCPAuth.Secret.KeyRing.Tests in 'MCPAuth.Secret.KeyRing.Tests.pas',
-  MCPAuth.Secret.AesGcm.Tests in 'MCPAuth.Secret.AesGcm.Tests.pas';
+  MCPAuth.Secret.AesGcm.Tests in 'MCPAuth.Secret.AesGcm.Tests.pas',
+  MCPAuth.Fakes.Clock in 'MCPAuth.Fakes.Clock.pas',
+  MCPAuth.Clock.Tests in 'MCPAuth.Clock.Tests.pas',
+  MCPAuth.Identity.Types.Tests in 'MCPAuth.Identity.Types.Tests.pas',
+  MCPAuth.Identity.Exceptions,
+  MCPAuth.Identity.Interfaces,
+  MCPAuth.Resource.Interfaces,
+  MCPAuth.OAuth.Interfaces,
+  MCPAuth.Store.Interfaces;
 
 begin
   ReportMemoryLeaksOnShutdown := True;
