@@ -50,6 +50,7 @@ MCPAuth4D lets several MCP servers share one OAuth 2.1 authorization server. Use
 - **Linked accounts.** Every upstream account a user signs in with or links is stored with its refresh token, encrypted with AES-256-GCM. MCP servers ask for an upstream access token per account; the auth server refreshes it when needed. When the upstream consent was revoked, or a resource needs more scopes than the account granted, the answer is `reconnect_required` and the account page shows "Reconnect".
 - **Sensitive values.** Tokens, codes, session ids and service secrets are stored only as SHA-256 hashes (base64url). Logs and error messages never carry a token, code, secret, key or e-mail address.
 - **Revocation delay.** An MCP server caches a positive introspection result for up to 60 seconds, so a revoked token can keep working at that MCP server for up to a minute.
+- **Security notes.** [docs/security.md](docs/security.md) describes the sign-in binding, cookies, refresh-token rotation, caches, upstream scopes, cleanup and the known limits.
 
 ## Requirements
 
@@ -138,7 +139,7 @@ The program uses `TAllowAllAccessPolicy`: every account the upstream provider ac
 - `resource` is the canonical URI of the MCP server, exactly as clients send it in the `resource` parameter (RFC 8707) and as the MCP server publishes it in its protected-resource metadata. It must use `https` unless `MCPAUTH_ALLOW_HTTP_RESOURCES=1`.
 - `name` is shown on the consent and account pages.
 - `service_id` and the secret behind `service_secret_sha256` are the HTTP Basic credentials of the MCP server on the internal endpoints. Resource URIs and service ids must be unique.
-- `providers` lists the upstream providers the resource needs and the scopes it needs from each. At sign-in the Microsoft provider asks for the union of the scopes of all resources.
+- `providers` lists the upstream providers the resource needs and the scopes it needs from each. At sign-in the Microsoft provider asks for the union of the scopes of all resources; a refresh asks only for the scopes the account granted. After you add a resource with a new scope, existing accounts get `reconnect_required` (`missing_scopes`) for that resource only, until the user reconnects the account.
 
 The registry is read at startup; restart the server after a change.
 
@@ -222,7 +223,7 @@ const Stores = TFireDACStore.CreateSet(Factory, Clock);
 To add another SQL database:
 
 1. Add a dialect to `TSqlDialect` (`MCPAuth.Store.FireDAC.Dialect`). Upsert, `RETURNING` and the version-table statements are the only database-specific SQL in the repositories.
-2. Add `migrations/<dialect>/0001_init.sql` with the same tables.
+2. Add `migrations/<dialect>/` with the same tables as the files in `migrations/postgres/`.
 3. Link the FireDAC driver of that database, and add an overload of `TFireDACStore.CreateSet` that takes the dialect.
 4. Run the contract tests against it: derive a fixture from `TStoreContractTests`, as `MCPAuth.Store.FireDAC.Tests` does.
 
