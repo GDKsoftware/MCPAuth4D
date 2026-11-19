@@ -117,7 +117,7 @@ const
   LayoutTemplate = 'layout.html';
   PgAdvancedParameter = 'PGAdvanced=';
   // Without these a query that waits on a lock or a stuck connection would hold a request thread forever.
-  DatabaseTimeouts = 'PGAdvanced=options=''-c statement_timeout=30000 -c lock_timeout=10000''';
+  DatabaseTimeouts = 'PGAdvanced=options=-c statement_timeout=30000 -c lock_timeout=10000';
 
 resourcestring
   ProviderNotActive = 'Resource %s uses provider %s, which is not configured';

@@ -102,7 +102,9 @@ resourcestring
 
 class function TServerSettings.FromEnvironment: TServerSettings;
 begin
-  const ExecutableFolder = TPath.GetDirectoryName(ParamStr(0));
+  // ParamStr(0) can be relative on Linux (./MCPAuthServer); the folder search needs the full path.
+  const ExecutablePath = TPath.GetFullPath(ParamStr(0));
+  const ExecutableFolder = TPath.GetDirectoryName(ExecutablePath);
 
   Result := FromVariables(
     function(const Name: string): string
