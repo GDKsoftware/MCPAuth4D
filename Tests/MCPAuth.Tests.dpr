@@ -43,7 +43,8 @@ uses
   MCPAuth.Identity.Accounts.Tests in 'MCPAuth.Identity.Accounts.Tests.pas',
   MCPAuth.OAuth.Server.Tests in 'MCPAuth.OAuth.Server.Tests.pas',
   MCPAuth.Web.Page.WebStencils.Tests in 'MCPAuth.Web.Page.WebStencils.Tests.pas',
-  MCPAuth.Web.Controller.OAuth.Tests in 'MCPAuth.Web.Controller.OAuth.Tests.pas';
+  MCPAuth.Web.Controller.OAuth.Tests in 'MCPAuth.Web.Controller.OAuth.Tests.pas',
+  MCPAuth.Internal.Controller.Tests in 'MCPAuth.Internal.Controller.Tests.pas';
 
 begin
   ReportMemoryLeaksOnShutdown := True;
