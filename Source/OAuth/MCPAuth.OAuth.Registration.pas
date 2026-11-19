@@ -78,7 +78,7 @@ begin
   Client.CreatedAtUtc := FClock.NowUtc;
   FClients.Save(Client);
 
-  Result := BuildResponse(Client.ClientId, Client.ClientName, RedirectUris, DateTimeToUnix(Client.CreatedAtUtc, False));
+  Result := BuildResponse(Client.ClientId, Client.ClientName, RedirectUris, DateTimeToUnix(Client.CreatedAtUtc, True));
 end;
 
 class function TClientRegistration.AsArray(const Value: TJSONValue): TJSONArray;

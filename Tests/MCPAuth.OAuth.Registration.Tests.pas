@@ -197,7 +197,8 @@ procedure TClientRegistrationTests.IssuedAtIsUnixSecondsFromClock;
 begin
   const Response = RegisterJson('{"redirect_uris":["' + ClaudeCallback + '"]}');
   try
-    Assert.AreEqual(DateTimeToUnix(FClock.NowUtc, False), Response.GetValue<Int64>('client_id_issued_at'));
+    // The fake clock's 2026-01-02 03:04:05 UTC; a conversion from local time shifts it outside UTC.
+    Assert.AreEqual<Int64>(1767323045, Response.GetValue<Int64>('client_id_issued_at'));
   finally
     Response.Free;
   end;
