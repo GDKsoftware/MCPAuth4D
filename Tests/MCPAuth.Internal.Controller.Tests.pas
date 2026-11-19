@@ -325,7 +325,7 @@ begin
     Assert.AreEqual(ResourceA, Json.GetValue<string>('aud'));
     Assert.AreEqual('client-1', Json.GetValue<string>('client_id'));
     Assert.AreEqual('Bearer', Json.GetValue<string>('token_type'));
-    Assert.AreEqual(DateTimeToUnix(IncHour(FClock.NowUtc, 1), False), Json.GetValue<Int64>('exp'));
+    Assert.AreEqual(DateTimeToUnix(IncHour(FClock.NowUtc, 1), True), Json.GetValue<Int64>('exp'));
   finally
     Json.Free;
   end;
@@ -409,7 +409,7 @@ begin
   const Json = JsonOf(Response);
   try
     Assert.IsTrue(Json.GetValue<string>('access_token').StartsWith('upstream-access'));
-    Assert.AreEqual(DateTimeToUnix(IncHour(FClock.NowUtc, 1), False), Json.GetValue<Int64>('expires_at'));
+    Assert.AreEqual(DateTimeToUnix(IncHour(FClock.NowUtc, 1), True), Json.GetValue<Int64>('expires_at'));
   finally
     Json.Free;
   end;

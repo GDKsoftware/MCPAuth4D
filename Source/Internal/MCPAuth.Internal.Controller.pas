@@ -153,7 +153,7 @@ end;
 
 class function TInternalController.ToUnixSeconds(const ValueUtc: TDateTime): Int64;
 begin
-  Result := DateTimeToUnix(ValueUtc, False);
+  Result := DateTimeToUnix(ValueUtc, True);
 end;
 
 class function TInternalController.TryParseAccountKey(const Value: string; out Key: TAccountKey): Boolean;
