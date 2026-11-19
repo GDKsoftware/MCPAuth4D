@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>@page.Title</title>
+<style>
+:root {
+  --page-background: #f4f5f7;
+  --surface: #ffffff;
+  --text: #1b1f24;
+  --text-muted: #52585f;
+  --border: #c8cdd3;
+  --accent: #1d4ed8;
+  --accent-text: #ffffff;
+  --danger: #b42318;
+  --danger-text: #ffffff;
+  --focus: #1d4ed8;
+  --radius: 8px;
+}
+@@media (prefers-color-scheme: dark) {
+  :root {
+    --page-background: #0f1216;
+    --surface: #1a1f26;
+    --text: #e8eaed;
+    --text-muted: #a8afb8;
+    --border: #3a424c;
+    --accent: #7aa2ff;
+    --accent-text: #0b1220;
+    --danger: #ff8a80;
+    --danger-text: #1a0605;
+    --focus: #7aa2ff;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--page-background);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.5;
+}
+main {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+h1 { font-size: 1.5rem; margin: 0 0 1rem; }
+h2 { font-size: 1.15rem; margin: 0 0 0.75rem; }
+p { margin: 0 0 0.75rem; }
+.muted { color: var(--text-muted); }
+dl { margin: 0 0 1rem; }
+dt { color: var(--text-muted); font-size: 0.9rem; }
+dd { margin: 0 0 0.6rem; overflow-wrap: anywhere; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 0.5rem 0.5rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+th { color: var(--text-muted); font-size: 0.85rem; font-weight: 600; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+form { margin: 0; }
+button {
+  font: inherit;
+  min-height: 2.75rem;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+button.danger { border-color: var(--danger); color: var(--danger); }
+button:hover { filter: brightness(0.95); }
+button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; border: 1px solid var(--danger); color: var(--danger); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+@RenderBody
+</main>
+</body>
+</html>

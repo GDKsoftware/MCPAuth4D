@@ -1,0 +1,87 @@
+@LayoutPage layout.html
+<section class="card">
+  <h1>Your account</h1>
+  <p>Signed in as <strong>@page.UserDisplayName</strong>.</p>
+  <form method="post" action="/logout">
+    <input type="hidden" name="csrf" value="@page.Csrf">
+    <button type="submit">Log out</button>
+  </form>
+</section>
+
+<section class="card" aria-labelledby="accounts-heading">
+  <h2 id="accounts-heading">Linked accounts</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th scope="col">Name</th><th scope="col">User name</th><th scope="col">Status</th><th scope="col">Actions</th></tr>
+      </thead>
+      <tbody>
+@foreach (var account in accounts) {
+        <tr>
+          <td>@account.DisplayName</td>
+          <td>@account.UserName</td>
+          <td>
+@if account.NeedsReconnect {
+            <span class="badge">Needs reconnect</span>
+} @else {
+            Connected
+}
+          </td>
+          <td>
+            <div class="actions">
+@if account.NeedsReconnect {
+              <form method="post" action="/account/reconnect">
+                <input type="hidden" name="key" value="@account.Key">
+                <input type="hidden" name="csrf" value="@page.Csrf">
+                <button type="submit" class="primary">Reconnect</button>
+              </form>
+}
+              <form method="post" action="/account/unlink">
+                <input type="hidden" name="key" value="@account.Key">
+                <input type="hidden" name="csrf" value="@page.Csrf">
+                <button type="submit" class="danger">Unlink</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+}
+      </tbody>
+    </table>
+  </div>
+  <div class="actions">
+@foreach (var provider in providers) {
+    <form method="post" action="/account/link">
+      <input type="hidden" name="provider" value="@provider.Name">
+      <input type="hidden" name="csrf" value="@page.Csrf">
+      <button type="submit">Link another account (@provider.Name)</button>
+    </form>
+}
+  </div>
+</section>
+
+<section class="card" aria-labelledby="grants-heading">
+  <h2 id="grants-heading">Granted access</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th scope="col">Resource</th><th scope="col">Application</th><th scope="col">Granted</th><th scope="col">Actions</th></tr>
+      </thead>
+      <tbody>
+@foreach (var grant in grants) {
+        <tr>
+          <td>@grant.ResourceName</td>
+          <td>@grant.ClientName</td>
+          <td>@grant.CreatedAt</td>
+          <td>
+            <form method="post" action="/account/revoke">
+              <input type="hidden" name="family" value="@grant.FamilyId">
+              <input type="hidden" name="csrf" value="@page.Csrf">
+              <button type="submit" class="danger">Revoke</button>
+            </form>
+          </td>
+        </tr>
+}
+      </tbody>
+    </table>
+  </div>
+</section>

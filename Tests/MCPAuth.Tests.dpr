@@ -41,7 +41,8 @@ uses
   MCPAuth.Fakes.AccessPolicy in 'MCPAuth.Fakes.AccessPolicy.pas',
   MCPAuth.Upstream.Providers.Tests in 'MCPAuth.Upstream.Providers.Tests.pas',
   MCPAuth.Identity.Accounts.Tests in 'MCPAuth.Identity.Accounts.Tests.pas',
-  MCPAuth.OAuth.Server.Tests in 'MCPAuth.OAuth.Server.Tests.pas';
+  MCPAuth.OAuth.Server.Tests in 'MCPAuth.OAuth.Server.Tests.pas',
+  MCPAuth.Web.Page.WebStencils.Tests in 'MCPAuth.Web.Page.WebStencils.Tests.pas';
 
 begin
   ReportMemoryLeaksOnShutdown := True;
