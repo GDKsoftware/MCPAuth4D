@@ -28,7 +28,15 @@ uses
   MCPAuth.Resource.Registry.Json.Tests in 'MCPAuth.Resource.Registry.Json.Tests.pas',
   MCPAuth.Resource.ServiceAuth.Tests in 'MCPAuth.Resource.ServiceAuth.Tests.pas',
   MCPAuth.OAuth.Metadata.Tests in 'MCPAuth.OAuth.Metadata.Tests.pas',
-  MCPAuth.OAuth.Registration.Tests in 'MCPAuth.OAuth.Registration.Tests.pas';
+  MCPAuth.OAuth.Registration.Tests in 'MCPAuth.OAuth.Registration.Tests.pas',
+  MCPAuth.Fakes.UpstreamHttp in 'MCPAuth.Fakes.UpstreamHttp.pas',
+  MCPAuth.Fakes.Jwt in 'MCPAuth.Fakes.Jwt.pas',
+  MCPAuth.Fakes.SelfSignedCertificate in 'MCPAuth.Fakes.SelfSignedCertificate.pas',
+  MCPAuth.Upstream.Jwt.Tests in 'MCPAuth.Upstream.Jwt.Tests.pas',
+  MCPAuth.Upstream.FormEncoding.Tests in 'MCPAuth.Upstream.FormEncoding.Tests.pas',
+  MCPAuth.Upstream.Credential.Secret.Tests in 'MCPAuth.Upstream.Credential.Secret.Tests.pas',
+  MCPAuth.Upstream.Credential.Certificate.Tests in 'MCPAuth.Upstream.Credential.Certificate.Tests.pas',
+  MCPAuth.Upstream.Microsoft.Tests in 'MCPAuth.Upstream.Microsoft.Tests.pas';
 
 begin
   ReportMemoryLeaksOnShutdown := True;
