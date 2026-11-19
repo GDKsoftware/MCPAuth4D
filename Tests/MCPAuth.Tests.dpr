@@ -21,7 +21,10 @@ uses
   MCPAuth.OAuth.Interfaces,
   MCPAuth.Store.Interfaces,
   MCPAuth.Store.Contract.Tests in 'MCPAuth.Store.Contract.Tests.pas',
-  MCPAuth.Store.Memory.Tests in 'MCPAuth.Store.Memory.Tests.pas';
+  MCPAuth.Store.Memory.Tests in 'MCPAuth.Store.Memory.Tests.pas',
+  MCPAuth.OAuth.Pkce.Tests in 'MCPAuth.OAuth.Pkce.Tests.pas',
+  MCPAuth.OAuth.RedirectPolicy.Tests in 'MCPAuth.OAuth.RedirectPolicy.Tests.pas',
+  MCPAuth.OAuth.Errors.Tests in 'MCPAuth.OAuth.Errors.Tests.pas';
 
 begin
   ReportMemoryLeaksOnShutdown := True;
