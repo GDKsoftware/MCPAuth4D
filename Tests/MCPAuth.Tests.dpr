@@ -19,7 +19,9 @@ uses
   MCPAuth.Identity.Interfaces,
   MCPAuth.Resource.Interfaces,
   MCPAuth.OAuth.Interfaces,
-  MCPAuth.Store.Interfaces;
+  MCPAuth.Store.Interfaces,
+  MCPAuth.Store.Contract.Tests in 'MCPAuth.Store.Contract.Tests.pas',
+  MCPAuth.Store.Memory.Tests in 'MCPAuth.Store.Memory.Tests.pas';
 
 begin
   ReportMemoryLeaksOnShutdown := True;
