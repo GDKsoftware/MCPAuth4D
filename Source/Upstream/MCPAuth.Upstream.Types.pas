@@ -21,6 +21,11 @@ type
     Identity: TUpstreamIdentity;
   end;
 
+  TUpstreamAccessToken = record
+    AccessToken: string;
+    ExpiresAtUtc: TDateTime;
+  end;
+
   TOAuthUpstreamSettings = record
     Name: string;
     AuthorizeUrl: string;

@@ -190,9 +190,9 @@ begin
   Keys[KeyId] := Key;
   const Protector = TAesGcmProtector.Create(TKeyRing.Create(KeyId, Keys));
 
-  const Accounts: ILinkedAccounts = TLinkedAccounts.Create(FStores.Users, FStores.LinkedAccounts, Protector, TAllowAllAccessPolicy.Create, FClockReference);
-  const Registry = TJsonResourceRegistry.FromJson(BuildResourceRegistryJson);
   const Providers = TUpstreamProviders.Create([FProviderReference]);
+  const Accounts: ILinkedAccounts = TLinkedAccounts.Create(FStores.Users, FStores.LinkedAccounts, Protector, TAllowAllAccessPolicy.Create, Providers, FClockReference);
+  const Registry = TJsonResourceRegistry.FromJson(BuildResourceRegistryJson);
 
   FServer := TAuthorizationServer.Create(FStores, Registry, Providers, Accounts, TTokenGenerator.Create, FSettings, FClockReference);
   RegisterClient;

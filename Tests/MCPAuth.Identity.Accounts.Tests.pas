@@ -10,13 +10,20 @@ uses
   MCPAuth.Identity.Interfaces,
   MCPAuth.Store.Interfaces,
   MCPAuth.Upstream.Types,
-  MCPAuth.Fakes.AccessPolicy;
+  MCPAuth.Upstream.Interfaces,
+  MCPAuth.Identity.Types,
+  MCPAuth.Fakes.AccessPolicy,
+  MCPAuth.Fakes.Clock,
+  MCPAuth.Fakes.UpstreamProvider;
 
 type
   [TestFixture]
   TLinkedAccountsTests = class
   private
-    FClock: IClock;
+    FClock: TFakeClock;
+    FClockReference: IClock;
+    FProvider: TFakeUpstreamProvider;
+    FProviderReference: IUpstreamProvider;
     FStores: TStoreSet;
     FProtector: ISecretProtector;
     FPolicy: TFakeAccessPolicy;
@@ -24,6 +31,10 @@ type
     FAccounts: ILinkedAccounts;
 
     function TokensFor(const ObjectId, RefreshToken: string): TUpstreamTokens;
+    function LinkAccount(const ObjectId, RefreshToken: string): TLinkedAccount;
+    function KeyOf(const ObjectId: string): TAccountKey;
+    function StoredRefreshToken(const ObjectId: string): string;
+    procedure SetUpstreamToken(const ExpiresInSeconds: Integer; const RefreshToken: string);
 
   public
     [Setup]
@@ -52,6 +63,48 @@ type
 
     [Test]
     procedure EmptyRefreshTokenKeepsStoredOne;
+
+    [Test]
+    procedure CachedTokenIsReusedUntilMargin;
+
+    [Test]
+    procedure ExpiredTokenTriggersRefreshAndStoresNewRefreshToken;
+
+    [Test]
+    procedure RefreshWithoutNewRefreshTokenKeepsStoredOne;
+
+    [Test]
+    procedure ConcurrentGetAccessTokenRefreshesOnce;
+
+    [Test]
+    procedure InvalidGrantMarksNeedsReconnect;
+
+    [Test]
+    procedure NeedsReconnectRaisesWithoutUpstreamCall;
+
+    [Test]
+    procedure MissingScopesRequireReconnect;
+
+    [Test]
+    procedure AlwaysGrantedScopesAreNotChecked;
+
+    [Test]
+    procedure AccountOfOtherUserIsNotFound;
+
+    [Test]
+    procedure UnknownAccountIsNotFound;
+
+    [Test]
+    procedure RewrapsWithCurrentKeyOnRefresh;
+
+    [Test]
+    procedure ListForUserReturnsOwnAccountsOnly;
+
+    [Test]
+    procedure UnlinkRemovesAccountAndCache;
+
+    [Test]
+    procedure LastAccountCannotBeUnlinked;
   end;
 
 implementation
@@ -59,27 +112,34 @@ implementation
 uses
   System.SysUtils,
   System.DateUtils,
+  System.Classes,
+  System.SyncObjs,
   Spring.Collections,
-  MCPAuth.Fakes.Clock,
   MCPAuth.Secret.KeyRing,
   MCPAuth.Secret.AesGcm,
   MCPAuth.Store.Memory,
-  MCPAuth.Identity.Types,
   MCPAuth.Identity.Exceptions,
-  MCPAuth.Identity.Accounts;
+  MCPAuth.Identity.Accounts,
+  MCPAuth.Upstream.Providers;
 
 const
   ProviderName = 'fake';
   TenantId = 'tenant-1';
   KeyId = 'k1';
   KeyLength = 32;
+  OldKeyId = 'k0';
+  AccessTokenScopes = 'openid offline_access Mail.Read';
+  ThreadCount = 8;
 
 { TLinkedAccountsTests }
 
 procedure TLinkedAccountsTests.Setup;
 begin
   FClock := TFakeClock.Create(EncodeDateTime(2026, 1, 2, 3, 4, 5, 0));
-  FStores := TMemoryStore.CreateSet(FClock);
+  FClockReference := FClock;
+  FStores := TMemoryStore.CreateSet(FClockReference);
+  FProvider := TFakeUpstreamProvider.Create(ProviderName);
+  FProviderReference := FProvider;
 
   var Key: TBytes;
   SetLength(Key, KeyLength);
@@ -90,7 +150,7 @@ begin
 
   FPolicy := TFakeAccessPolicy.Create;
   FPolicyReference := FPolicy;
-  FAccounts := TLinkedAccounts.Create(FStores.Users, FStores.LinkedAccounts, FProtector, FPolicyReference, FClock);
+  FAccounts := TLinkedAccounts.Create(FStores.Users, FStores.LinkedAccounts, FProtector, FPolicyReference, TUpstreamProviders.Create([FProviderReference]), FClockReference);
 end;
 
 procedure TLinkedAccountsTests.TearDown;
@@ -99,7 +159,8 @@ begin
   FPolicyReference := nil;
   FProtector := nil;
   FStores := Default(TStoreSet);
-  FClock := nil;
+  FProviderReference := nil;
+  FClockReference := nil;
 end;
 
 function TLinkedAccountsTests.TokensFor(const ObjectId, RefreshToken: string): TUpstreamTokens;
@@ -218,6 +279,283 @@ begin
   FStores.LinkedAccounts.TryFind(TokensWithoutRefresh.Identity.Key, Account);
   const Context = Format('%s|%s', [User.Id, Account.Key.Value]);
   Assert.AreEqual('refresh-1', FProtector.Unprotect(Account.ProtectedRefreshToken, Context));
+end;
+
+function TLinkedAccountsTests.KeyOf(const ObjectId: string): TAccountKey;
+begin
+  Result := TokensFor(ObjectId, '').Identity.Key;
+end;
+
+function TLinkedAccountsTests.LinkAccount(const ObjectId, RefreshToken: string): TLinkedAccount;
+begin
+  var Tokens := TokensFor(ObjectId, RefreshToken);
+  Tokens.Scope := AccessTokenScopes;
+
+  const User = FAccounts.ResolveOrCreateUser(Tokens);
+  FStores.LinkedAccounts.TryFind(Tokens.Identity.Key, Result);
+  Assert.AreEqual(User.Id, Result.UserId);
+end;
+
+function TLinkedAccountsTests.StoredRefreshToken(const ObjectId: string): string;
+begin
+  var Account: TLinkedAccount;
+  Assert.IsTrue(FStores.LinkedAccounts.TryFind(KeyOf(ObjectId), Account), 'account stored');
+
+  Result := FProtector.Unprotect(Account.ProtectedRefreshToken, Format('%s|%s', [Account.UserId, Account.Key.Value]));
+end;
+
+procedure TLinkedAccountsTests.SetUpstreamToken(const ExpiresInSeconds: Integer; const RefreshToken: string);
+begin
+  FProvider.ExpiresAtUtc := IncSecond(FClock.NowUtc, ExpiresInSeconds);
+  FProvider.RefreshToken := RefreshToken;
+end;
+
+procedure TLinkedAccountsTests.CachedTokenIsReusedUntilMargin;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+  SetUpstreamToken(3600, 'refresh-2');
+
+  const First = FAccounts.GetAccessToken(Account.UserId, Account.Key, ['Mail.Read']);
+  FClock.AdvanceSeconds(3000);
+  const Second = FAccounts.GetAccessToken(Account.UserId, Account.Key, ['Mail.Read']);
+
+  Assert.AreEqual(1, FProvider.RefreshCount, 'still cached');
+  Assert.AreEqual(First.AccessToken, Second.AccessToken);
+
+  // 3600 s minus the 60 s margin: 3540 s after the refresh
+  FClock.AdvanceSeconds(540);
+  FAccounts.GetAccessToken(Account.UserId, Account.Key, ['Mail.Read']);
+
+  Assert.AreEqual(2, FProvider.RefreshCount, 'refreshed at the margin');
+end;
+
+procedure TLinkedAccountsTests.ExpiredTokenTriggersRefreshAndStoresNewRefreshToken;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+  SetUpstreamToken(3600, 'refresh-2');
+
+  const Token = FAccounts.GetAccessToken(Account.UserId, Account.Key, ['Mail.Read']);
+
+  Assert.AreEqual('refresh-1', FProvider.LastRefreshInput);
+  Assert.AreEqual('refresh-2', StoredRefreshToken('object-1'));
+  Assert.AreEqual(FProvider.ExpiresAtUtc, Token.ExpiresAtUtc, 0.00001);
+  Assert.IsNotEmpty(Token.AccessToken);
+end;
+
+procedure TLinkedAccountsTests.RefreshWithoutNewRefreshTokenKeepsStoredOne;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+  SetUpstreamToken(3600, '');
+
+  FAccounts.GetAccessToken(Account.UserId, Account.Key, ['Mail.Read']);
+
+  Assert.AreEqual('refresh-1', StoredRefreshToken('object-1'));
+end;
+
+procedure TLinkedAccountsTests.ConcurrentGetAccessTokenRefreshesOnce;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+  SetUpstreamToken(3600, 'refresh-2');
+  FProvider.RefreshDelayMs := 200;
+
+  var FailureCount := 0;
+  var Threads: TArray<TThread>;
+  for var Index := 1 to ThreadCount do
+  begin
+    const Thread = TThread.CreateAnonymousThread(
+      procedure
+      begin
+        try
+          FAccounts.GetAccessToken(Account.UserId, Account.Key, ['Mail.Read']);
+        except
+          TInterlocked.Increment(FailureCount);
+        end;
+      end);
+    Thread.FreeOnTerminate := False;
+    Threads := Threads + [Thread];
+  end;
+
+  for var Thread in Threads do
+  begin
+    Thread.Start;
+  end;
+  for var Thread in Threads do
+  begin
+    Thread.WaitFor;
+    Thread.Free;
+  end;
+
+  Assert.AreEqual(0, FailureCount, 'failures');
+  Assert.AreEqual(1, FProvider.RefreshCount, 'refresh calls');
+  Assert.AreEqual('refresh-2', StoredRefreshToken('object-1'));
+end;
+
+procedure TLinkedAccountsTests.InvalidGrantMarksNeedsReconnect;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+  FProvider.IsRevoked := True;
+
+  try
+    FAccounts.GetAccessToken(Account.UserId, Account.Key, ['Mail.Read']);
+    Assert.Fail('ELinkedAccountNeedsReconnect expected');
+  except
+    on Error: ELinkedAccountNeedsReconnect do
+    begin
+      Assert.AreEqual('revoked', Error.Reason);
+    end;
+  end;
+
+  var Stored: TLinkedAccount;
+  FStores.LinkedAccounts.TryFind(Account.Key, Stored);
+  Assert.IsTrue(Stored.NeedsReconnect, 'NeedsReconnect stored');
+end;
+
+procedure TLinkedAccountsTests.NeedsReconnectRaisesWithoutUpstreamCall;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+  var Stored: TLinkedAccount;
+  FStores.LinkedAccounts.TryFind(Account.Key, Stored);
+  Stored.NeedsReconnect := True;
+  FStores.LinkedAccounts.Save(Stored);
+  SetUpstreamToken(3600, 'refresh-2');
+
+  try
+    FAccounts.GetAccessToken(Account.UserId, Account.Key, ['Mail.Read']);
+    Assert.Fail('ELinkedAccountNeedsReconnect expected');
+  except
+    on Error: ELinkedAccountNeedsReconnect do
+    begin
+      Assert.AreEqual('revoked', Error.Reason);
+    end;
+  end;
+
+  Assert.AreEqual(0, FProvider.RefreshCount, 'upstream calls');
+end;
+
+procedure TLinkedAccountsTests.MissingScopesRequireReconnect;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+  SetUpstreamToken(3600, 'refresh-2');
+
+  try
+    FAccounts.GetAccessToken(Account.UserId, Account.Key, ['mail.read', 'Calendars.Read']);
+    Assert.Fail('ELinkedAccountNeedsReconnect expected');
+  except
+    on Error: ELinkedAccountNeedsReconnect do
+    begin
+      Assert.AreEqual('missing_scopes', Error.Reason);
+    end;
+  end;
+
+  Assert.AreEqual(0, FProvider.RefreshCount, 'upstream calls');
+end;
+
+procedure TLinkedAccountsTests.AlwaysGrantedScopesAreNotChecked;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+  SetUpstreamToken(3600, 'refresh-2');
+
+  const Token = FAccounts.GetAccessToken(Account.UserId, Account.Key, ['mail.read', 'openid', 'profile', 'email', 'offline_access']);
+
+  Assert.IsNotEmpty(Token.AccessToken);
+end;
+
+procedure TLinkedAccountsTests.AccountOfOtherUserIsNotFound;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+  const OtherUser = FAccounts.ResolveOrCreateUser(TokensFor('object-2', 'refresh-2'));
+
+  Assert.WillRaise(
+    procedure
+    begin
+      FAccounts.GetAccessToken(OtherUser.Id, Account.Key, ['Mail.Read']);
+    end,
+    ELinkedAccountNotFound);
+end;
+
+procedure TLinkedAccountsTests.UnknownAccountIsNotFound;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+
+  Assert.WillRaise(
+    procedure
+    begin
+      FAccounts.GetAccessToken(Account.UserId, KeyOf('unknown'), []);
+    end,
+    ELinkedAccountNotFound);
+end;
+
+procedure TLinkedAccountsTests.RewrapsWithCurrentKeyOnRefresh;
+begin
+  var OldKey: TBytes;
+  SetLength(OldKey, KeyLength);
+  FillChar(OldKey[0], KeyLength, 9);
+  var NewKey: TBytes;
+  SetLength(NewKey, KeyLength);
+  FillChar(NewKey[0], KeyLength, 7);
+
+  const OldKeys = TCollections.CreateDictionary<string, TBytes>;
+  OldKeys[OldKeyId] := OldKey;
+  const OldProtector: ISecretProtector = TAesGcmProtector.Create(TKeyRing.Create(OldKeyId, OldKeys));
+
+  const Account = LinkAccount('object-1', 'refresh-1');
+  var Stored: TLinkedAccount;
+  FStores.LinkedAccounts.TryFind(Account.Key, Stored);
+  const Context = Format('%s|%s', [Account.UserId, Account.Key.Value]);
+  Stored.ProtectedRefreshToken := OldProtector.Protect('refresh-1', Context);
+  FStores.LinkedAccounts.Save(Stored);
+
+  const RotatedKeys = TCollections.CreateDictionary<string, TBytes>;
+  RotatedKeys[OldKeyId] := OldKey;
+  RotatedKeys[KeyId] := NewKey;
+  const RotatedProtector: ISecretProtector = TAesGcmProtector.Create(TKeyRing.Create(KeyId, RotatedKeys));
+  const Accounts: ILinkedAccounts = TLinkedAccounts.Create(FStores.Users, FStores.LinkedAccounts, RotatedProtector, FPolicyReference, TUpstreamProviders.Create([FProviderReference]), FClockReference);
+  Assert.IsTrue(RotatedProtector.NeedsRewrap(Stored.ProtectedRefreshToken), 'precondition: old key');
+  SetUpstreamToken(3600, '');
+
+  Accounts.GetAccessToken(Account.UserId, Account.Key, ['Mail.Read']);
+
+  FStores.LinkedAccounts.TryFind(Account.Key, Stored);
+  Assert.IsFalse(RotatedProtector.NeedsRewrap(Stored.ProtectedRefreshToken), 'rewrapped');
+  Assert.AreEqual('refresh-1', RotatedProtector.Unprotect(Stored.ProtectedRefreshToken, Context));
+end;
+
+procedure TLinkedAccountsTests.ListForUserReturnsOwnAccountsOnly;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+  FAccounts.Link(Account.UserId, TokensFor('object-2', 'refresh-2'));
+  FAccounts.ResolveOrCreateUser(TokensFor('object-3', 'refresh-3'));
+
+  Assert.AreEqual(2, FAccounts.ListForUser(Account.UserId).Count);
+end;
+
+procedure TLinkedAccountsTests.UnlinkRemovesAccountAndCache;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+  FAccounts.Link(Account.UserId, TokensFor('object-2', 'refresh-2'));
+  SetUpstreamToken(3600, 'refresh-3');
+  FAccounts.GetAccessToken(Account.UserId, Account.Key, []);
+  const RefreshesBefore = FProvider.RefreshCount;
+
+  FAccounts.Unlink(Account.UserId, Account.Key);
+  FAccounts.Link(Account.UserId, TokensFor('object-1', 'refresh-4'));
+  FAccounts.GetAccessToken(Account.UserId, Account.Key, []);
+
+  Assert.AreEqual(RefreshesBefore + 1, FProvider.RefreshCount, 'cache entry removed');
+  Assert.AreEqual(2, FAccounts.ListForUser(Account.UserId).Count);
+end;
+
+procedure TLinkedAccountsTests.LastAccountCannotBeUnlinked;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+
+  Assert.WillRaise(
+    procedure
+    begin
+      FAccounts.Unlink(Account.UserId, Account.Key);
+    end,
+    ELastAccountCannotBeUnlinked);
+  Assert.AreEqual(1, FAccounts.ListForUser(Account.UserId).Count);
 end;
 
 end.

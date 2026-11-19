@@ -33,6 +33,17 @@ type
 
     // Raises EAccountLinkedToOtherUser when the account belongs to another user.
     function Link(const UserId: string; const Tokens: TUpstreamTokens): TLinkedAccount;
+
+    function ListForUser(const UserId: string): IReadOnlyList<TLinkedAccount>;
+
+    // Raises ELinkedAccountNotFound for an unknown account or one of another user.
+    // Raises ELinkedAccountNeedsReconnect (reason 'revoked' or 'missing_scopes') when the account has to be linked again.
+    // The scopes openid, profile, offline_access and email are not checked against the granted scopes.
+    function GetAccessToken(const UserId: string; const Key: TAccountKey; const RequiredScopes: TArray<string>): TUpstreamAccessToken;
+
+    // Raises ELinkedAccountNotFound for an unknown account or one of another user.
+    // Raises ELastAccountCannotBeUnlinked for the last account of the user.
+    procedure Unlink(const UserId: string; const Key: TAccountKey);
   end;
 
 implementation

@@ -23,6 +23,9 @@ type
     FLastRedirectUri: string;
     FExchangeCount: Integer;
     FRefreshCount: Integer;
+    FRefreshDelayMs: Integer;
+    FLastRefreshInput: string;
+    FRevoked: Boolean;
 
     function BuildTokens: TUpstreamTokens;
 
@@ -43,12 +46,16 @@ type
     property LastRedirectUri: string read FLastRedirectUri;
     property ExchangeCount: Integer read FExchangeCount;
     property RefreshCount: Integer read FRefreshCount;
+    property RefreshDelayMs: Integer read FRefreshDelayMs write FRefreshDelayMs;
+    property LastRefreshInput: string read FLastRefreshInput;
+    property IsRevoked: Boolean read FRevoked write FRevoked;
   end;
 
 implementation
 
 uses
   System.SysUtils,
+  System.SyncObjs,
   System.NetEncoding,
   MCPAuth.OAuth.Pkce,
   MCPAuth.Upstream.Exceptions;
@@ -88,7 +95,12 @@ end;
 
 function TFakeUpstreamProvider.Refresh(const RefreshToken: string): TUpstreamTokens;
 begin
-  Inc(FRefreshCount);
+  if FRevoked then
+    raise EUpstreamGrantRevoked.Create('The fake provider revoked the grant');
+
+  TInterlocked.Increment(FRefreshCount);
+  FLastRefreshInput := RefreshToken;
+  Sleep(FRefreshDelayMs);
   Result := BuildTokens;
 end;
 
