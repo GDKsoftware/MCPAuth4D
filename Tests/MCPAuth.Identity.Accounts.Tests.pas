@@ -3,6 +3,7 @@ unit MCPAuth.Identity.Accounts.Tests;
 interface
 
 uses
+  System.SysUtils,
   DUnitX.TestFramework,
   MCPAuth.Clock.Interfaces,
   MCPAuth.Secret.Interfaces,
@@ -34,6 +35,8 @@ type
     function LinkAccount(const ObjectId, RefreshToken: string): TLinkedAccount;
     function KeyOf(const ObjectId: string): TAccountKey;
     function StoredRefreshToken(const ObjectId: string): string;
+    procedure RunInThreads(const Work: TProc<Integer>);
+    function WorkFor(const Work: TProc<Integer>; const Index: Integer): TProc;
     procedure SetUpstreamToken(const ExpiresInSeconds: Integer; const RefreshToken: string);
 
   public
@@ -42,6 +45,12 @@ type
 
     [TearDown]
     procedure TearDown;
+
+    [Test]
+    procedure ConcurrentFirstSignInsCreateOneUser;
+
+    [Test]
+    procedure ConcurrentUnlinksKeepTheLastAccount;
 
     [Test]
     procedure RefreshRequestsTheGrantedScopes;
@@ -119,7 +128,6 @@ type
 implementation
 
 uses
-  System.SysUtils,
   System.DateUtils,
   System.Classes,
   System.SyncObjs,
@@ -318,6 +326,85 @@ procedure TLinkedAccountsTests.SetUpstreamToken(const ExpiresInSeconds: Integer;
 begin
   FProvider.ExpiresAtUtc := IncSecond(FClock.NowUtc, ExpiresInSeconds);
   FProvider.RefreshToken := RefreshToken;
+end;
+
+procedure TLinkedAccountsTests.RunInThreads(const Work: TProc<Integer>);
+begin
+  var Threads: TArray<TThread>;
+  for var Index := 0 to ThreadCount - 1 do
+  begin
+    Threads := Threads + [TThread.CreateAnonymousThread(WorkFor(Work, Index))];
+    Threads[Index].FreeOnTerminate := False;
+  end;
+
+  for var Thread in Threads do
+  begin
+    Thread.Start;
+  end;
+  for var Thread in Threads do
+  begin
+    Thread.WaitFor;
+    Thread.Free;
+  end;
+end;
+
+function TLinkedAccountsTests.WorkFor(const Work: TProc<Integer>; const Index: Integer): TProc;
+begin
+  Result :=
+    procedure
+    begin
+      Work(Index);
+    end;
+end;
+
+procedure TLinkedAccountsTests.ConcurrentFirstSignInsCreateOneUser;
+begin
+  var UserIds: TArray<string>;
+  SetLength(UserIds, ThreadCount);
+  var FailureCount := 0;
+
+  RunInThreads(
+    procedure(Index: Integer)
+    begin
+      try
+        UserIds[Index] := FAccounts.ResolveOrCreateUser(TokensFor('object-1', 'refresh-1')).Id;
+      except
+        TInterlocked.Increment(FailureCount);
+      end;
+    end);
+
+  Assert.AreEqual(0, FailureCount, 'failures');
+  for var UserId in UserIds do
+  begin
+    Assert.AreEqual(UserIds[0], UserId);
+  end;
+end;
+
+procedure TLinkedAccountsTests.ConcurrentUnlinksKeepTheLastAccount;
+begin
+  const User = FAccounts.ResolveOrCreateUser(TokensFor('object-0', 'refresh-0'));
+  var Keys: TArray<TAccountKey> := [KeyOf('object-0')];
+  for var Index := 1 to ThreadCount - 1 do
+  begin
+    const ObjectId = Format('object-%d', [Index]);
+    FAccounts.Link(User.Id, TokensFor(ObjectId, 'refresh'));
+    Keys := Keys + [KeyOf(ObjectId)];
+  end;
+
+  var RefusedCount := 0;
+  RunInThreads(
+    procedure(Index: Integer)
+    begin
+      try
+        FAccounts.Unlink(User.Id, Keys[Index]);
+      except
+        on ELastAccountCannotBeUnlinked do
+          TInterlocked.Increment(RefusedCount);
+      end;
+    end);
+
+  Assert.AreEqual(1, RefusedCount, 'refused unlinks');
+  Assert.AreEqual(1, FAccounts.ListForUser(User.Id).Count);
 end;
 
 procedure TLinkedAccountsTests.RefreshRequestsTheGrantedScopes;

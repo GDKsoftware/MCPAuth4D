@@ -29,7 +29,12 @@ type
 
     class function NewUserId: string; static;
     class function RefreshTokenContext(const UserId: string; const Key: TAccountKey): string; static;
+    class function AccountLockName(const Key: TAccountKey): string; static;
+    class function UserLockName(const UserId: string): string; static;
 
+    function ResolveOrCreateUserLocked(const Tokens: TUpstreamTokens): TAuthUser;
+    function LinkLocked(const UserId: string; const Tokens: TUpstreamTokens): TLinkedAccount;
+    procedure UnlinkLocked(const UserId: string; const Key: TAccountKey);
     procedure GuardAllowed(const Identity: TUpstreamIdentity);
     function GetUser(const UserId: string): TAuthUser;
     function CreateUser(const Identity: TUpstreamIdentity): TAuthUser;
@@ -72,6 +77,8 @@ const
   ReasonRevoked = 'revoked';
   ReasonMissingScopes = 'missing_scopes';
   AlwaysGrantedScopes: array[0..3] of string = ('openid', 'profile', 'offline_access', 'email');
+  AccountLockFormat = 'account|%s';
+  UserLockFormat = 'user|%s';
 
 { TLinkedAccounts }
 
@@ -86,6 +93,16 @@ end;
 class function TLinkedAccounts.RefreshTokenContext(const UserId: string; const Key: TAccountKey): string;
 begin
   Result := Format('%s|%s', [UserId, Key.Value]);
+end;
+
+class function TLinkedAccounts.AccountLockName(const Key: TAccountKey): string;
+begin
+  Result := Format(AccountLockFormat, [Key.Value]);
+end;
+
+class function TLinkedAccounts.UserLockName(const UserId: string): string;
+begin
+  Result := Format(UserLockFormat, [UserId]);
 end;
 
 constructor TLinkedAccounts.Create(const Users: IUserRepository; const Accounts: ILinkedAccountRepository; const Protector: ISecretProtector; const Policy: IAccessPolicy; const Providers: IUpstreamProviders; const Clock: IClock);
@@ -117,6 +134,18 @@ function TLinkedAccounts.ResolveOrCreateUser(const Tokens: TUpstreamTokens): TAu
 begin
   GuardAllowed(Tokens.Identity);
 
+  // Two first sign-ins of the same account at once would otherwise both create a user.
+  const AccountLock = LockFor(AccountLockName(Tokens.Identity.Key));
+  AccountLock.Enter;
+  try
+    Result := ResolveOrCreateUserLocked(Tokens);
+  finally
+    AccountLock.Leave;
+  end;
+end;
+
+function TLinkedAccounts.ResolveOrCreateUserLocked(const Tokens: TUpstreamTokens): TAuthUser;
+begin
   var Existing: TLinkedAccount;
   const IsKnownAccount = FAccounts.TryFind(Tokens.Identity.Key, Existing);
   if IsKnownAccount then
@@ -134,6 +163,18 @@ end;
 function TLinkedAccounts.Link(const UserId: string; const Tokens: TUpstreamTokens): TLinkedAccount;
 begin
   GuardAllowed(Tokens.Identity);
+
+  const AccountLock = LockFor(AccountLockName(Tokens.Identity.Key));
+  AccountLock.Enter;
+  try
+    Result := LinkLocked(UserId, Tokens);
+  finally
+    AccountLock.Leave;
+  end;
+end;
+
+function TLinkedAccounts.LinkLocked(const UserId: string; const Tokens: TUpstreamTokens): TLinkedAccount;
+begin
   GetUser(UserId);
 
   var Existing: TLinkedAccount;
@@ -177,6 +218,18 @@ begin
 end;
 
 procedure TLinkedAccounts.Unlink(const UserId: string; const Key: TAccountKey);
+begin
+  // The last-account check counts all accounts of the user, so concurrent unlinks of one user run one at a time.
+  const UserLock = LockFor(UserLockName(UserId));
+  UserLock.Enter;
+  try
+    UnlinkLocked(UserId, Key);
+  finally
+    UserLock.Leave;
+  end;
+end;
+
+procedure TLinkedAccounts.UnlinkLocked(const UserId: string; const Key: TAccountKey);
 begin
   const Context = RefreshTokenContext(UserId, Key);
 
