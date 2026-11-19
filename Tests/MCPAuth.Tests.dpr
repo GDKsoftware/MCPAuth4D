@@ -24,7 +24,9 @@ uses
   MCPAuth.Store.Memory.Tests in 'MCPAuth.Store.Memory.Tests.pas',
   MCPAuth.OAuth.Pkce.Tests in 'MCPAuth.OAuth.Pkce.Tests.pas',
   MCPAuth.OAuth.RedirectPolicy.Tests in 'MCPAuth.OAuth.RedirectPolicy.Tests.pas',
-  MCPAuth.OAuth.Errors.Tests in 'MCPAuth.OAuth.Errors.Tests.pas';
+  MCPAuth.OAuth.Errors.Tests in 'MCPAuth.OAuth.Errors.Tests.pas',
+  MCPAuth.Resource.Registry.Json.Tests in 'MCPAuth.Resource.Registry.Json.Tests.pas',
+  MCPAuth.Resource.ServiceAuth.Tests in 'MCPAuth.Resource.ServiceAuth.Tests.pas';
 
 begin
   ReportMemoryLeaksOnShutdown := True;
