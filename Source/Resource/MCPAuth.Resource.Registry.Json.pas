@@ -42,6 +42,7 @@ implementation
 uses
   System.SysUtils,
   System.IOUtils,
+  // Only for the inline expansion of TJSONArray.GetValue (H2443); the collections are Spring ones.
   System.Generics.Collections,
   MCPAuth.Resource.Exceptions;
 
@@ -264,8 +265,7 @@ begin
     end;
   end;
 
-  Result := Scopes.ToArray;
-  TArray.Sort<string>(Result);
+  Result := Scopes.Ordered.ToArray;
 end;
 
 end.
