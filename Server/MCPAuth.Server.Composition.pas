@@ -274,7 +274,8 @@ begin
     raise EServerConfiguration.Create(LibraryTemplatesMissing);
 
   const HasProjectTemplates = not FSettings.ProjectTemplatesPath.IsEmpty;
-  if HasProjectTemplates and not TDirectory.Exists(FSettings.ProjectTemplatesPath) then
+  const IsProjectTemplatesMissing = (HasProjectTemplates and not TDirectory.Exists(FSettings.ProjectTemplatesPath));
+  if IsProjectTemplatesMissing then
     raise EServerConfiguration.Create(ProjectTemplatesMissing);
 end;
 
