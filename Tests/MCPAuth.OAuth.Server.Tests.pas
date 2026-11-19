@@ -102,6 +102,9 @@ type
     procedure ApproveByOtherUserIsRejected;
 
     [Test]
+    procedure DenyByOtherUserIsRejected;
+
+    [Test]
     procedure UpstreamCallbackIsSingleUse;
 
     [Test]
@@ -530,7 +533,7 @@ begin
   FServer.BeginAuthorize(AuthorizeRequest(ResourceA));
   const Completion = FServer.CompleteUpstream(ProviderName, FProvider.LastState, UpstreamCode);
 
-  const Redirect = FServer.Deny(Completion.PendingId);
+  const Redirect = FServer.Deny(Completion.PendingId, Completion.UserId);
 
   Assert.IsTrue(Redirect.StartsWith(Format('%s?', [RedirectUri])), Redirect);
   Assert.AreEqual(TOAuthErrorCode.AccessDenied, QueryParam(Redirect, 'error'));
@@ -568,6 +571,22 @@ begin
 
   const Redirect = FServer.Approve(Start.PendingId, SessionUser);
   Assert.IsNotEmpty(QueryParam(Redirect, 'code'), 'the right user can still approve');
+end;
+
+procedure TAuthorizationServerTests.DenyByOtherUserIsRejected;
+begin
+  const Start = FServer.BeginAuthorize(AuthorizeRequest(ResourceA), SessionUser);
+
+  const ErrorCode = ErrorCodeOf(
+    procedure
+    begin
+      FServer.Deny(Start.PendingId, OtherUser);
+    end);
+
+  Assert.AreEqual(TOAuthErrorCode.AccessDenied, ErrorCode);
+
+  const Redirect = FServer.Approve(Start.PendingId, SessionUser);
+  Assert.IsNotEmpty(QueryParam(Redirect, 'code'), 'the request is still open for the right user');
 end;
 
 procedure TAuthorizationServerTests.UpstreamCallbackIsSingleUse;

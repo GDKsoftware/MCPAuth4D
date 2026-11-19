@@ -60,9 +60,9 @@ type
 
     function ConsentInfo(const PendingId: string): TConsentInfo;
 
-    // Only the user who signed in for this pending authorization may approve it.
+    // Only the user who signed in for this pending authorization may approve or deny it.
     function Approve(const PendingId, UserId: string): string;
-    function Deny(const PendingId: string): string;
+    function Deny(const PendingId, UserId: string): string;
 
     function ExchangeToken(const Request: TTokenRequest): TTokenResponse;
 

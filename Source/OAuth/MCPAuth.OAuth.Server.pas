@@ -56,6 +56,7 @@ type
     function CompletePortalLogin(const Pending: TPendingAuthorization; const Tokens: TUpstreamTokens): TUpstreamCompletion;
 
     function GetPendingForConsent(const PendingId: string): TPendingAuthorization;
+    procedure GuardSessionUser(const Pending: TPendingAuthorization; const UserId: string);
     function TakePending(const PendingId: string): TPendingAuthorization;
     function IssueCode(const Pending: TPendingAuthorization): string;
 
@@ -83,7 +84,7 @@ type
 
     function ConsentInfo(const PendingId: string): TConsentInfo;
     function Approve(const PendingId, UserId: string): string;
-    function Deny(const PendingId: string): string;
+    function Deny(const PendingId, UserId: string): string;
 
     function ExchangeToken(const Request: TTokenRequest): TTokenResponse;
 
@@ -441,15 +442,20 @@ end;
 function TAuthorizationServer.Approve(const PendingId, UserId: string): string;
 begin
   const Pending = GetPendingForConsent(PendingId);
-  const IsSessionUser = (not UserId.IsEmpty and (Pending.UserId = UserId));
-  if not IsSessionUser then
-    raise EOAuthError.Create(TOAuthErrorCode.AccessDenied, 'Only the signed-in user of this request may approve it');
+  GuardSessionUser(Pending, UserId);
 
   const Taken = TakePending(PendingId);
   const Code = IssueCode(Taken);
 
   const CodeFields: TArray<TPair<string, string>> = [TPair<string, string>.Create(CodeField, Code)];
   Result := AppendQuery(Taken.RedirectUri, WithState(CodeFields, Taken.State));
+end;
+
+procedure TAuthorizationServer.GuardSessionUser(const Pending: TPendingAuthorization; const UserId: string);
+begin
+  const IsSessionUser = (not UserId.IsEmpty and (Pending.UserId = UserId));
+  if not IsSessionUser then
+    raise EOAuthError.Create(TOAuthErrorCode.AccessDenied, 'Only the signed-in user of this request may decide on it');
 end;
 
 function TAuthorizationServer.TakePending(const PendingId: string): TPendingAuthorization;
@@ -475,9 +481,11 @@ begin
   FStores.Grants.Put(Grant);
 end;
 
-function TAuthorizationServer.Deny(const PendingId: string): string;
+function TAuthorizationServer.Deny(const PendingId, UserId: string): string;
 begin
-  GetPendingForConsent(PendingId);
+  const Pending = GetPendingForConsent(PendingId);
+  GuardSessionUser(Pending, UserId);
+
   const Taken = TakePending(PendingId);
 
   const ErrorFields: TArray<TPair<string, string>> = [TPair<string, string>.Create(ErrorField, TOAuthErrorCode.AccessDenied)];
