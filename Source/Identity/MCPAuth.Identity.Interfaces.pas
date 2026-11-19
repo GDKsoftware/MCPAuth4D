@@ -4,7 +4,8 @@ interface
 
 uses
   Spring.Collections,
-  MCPAuth.Identity.Types;
+  MCPAuth.Identity.Types,
+  MCPAuth.Upstream.Types;
 
 type
   IUserRepository = interface
@@ -21,6 +22,17 @@ type
     // Raises EAccountLinkedToOtherUser when the key belongs to another user.
     procedure Save(const Account: TLinkedAccount);
     procedure Delete(const UserId: string; const Key: TAccountKey);
+  end;
+
+  // Both methods raise EAccessDenied when the access policy rejects the upstream identity.
+  // Upstream refresh tokens are stored encrypted with the context UserId + '|' + Key.Value.
+  ILinkedAccounts = interface
+    ['{8E3B6A19-D27C-4F05-A4B8-C91E5D0F7362}']
+    // A known account yields its user with the new refresh token and scopes stored; otherwise a new user and account are created.
+    function ResolveOrCreateUser(const Tokens: TUpstreamTokens): TAuthUser;
+
+    // Raises EAccountLinkedToOtherUser when the account belongs to another user.
+    function Link(const UserId: string; const Tokens: TUpstreamTokens): TLinkedAccount;
   end;
 
 implementation

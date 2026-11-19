@@ -36,7 +36,12 @@ uses
   MCPAuth.Upstream.FormEncoding.Tests in 'MCPAuth.Upstream.FormEncoding.Tests.pas',
   MCPAuth.Upstream.Credential.Secret.Tests in 'MCPAuth.Upstream.Credential.Secret.Tests.pas',
   MCPAuth.Upstream.Credential.Certificate.Tests in 'MCPAuth.Upstream.Credential.Certificate.Tests.pas',
-  MCPAuth.Upstream.Microsoft.Tests in 'MCPAuth.Upstream.Microsoft.Tests.pas';
+  MCPAuth.Upstream.Microsoft.Tests in 'MCPAuth.Upstream.Microsoft.Tests.pas',
+  MCPAuth.Fakes.UpstreamProvider in 'MCPAuth.Fakes.UpstreamProvider.pas',
+  MCPAuth.Fakes.AccessPolicy in 'MCPAuth.Fakes.AccessPolicy.pas',
+  MCPAuth.Upstream.Providers.Tests in 'MCPAuth.Upstream.Providers.Tests.pas',
+  MCPAuth.Identity.Accounts.Tests in 'MCPAuth.Identity.Accounts.Tests.pas',
+  MCPAuth.OAuth.Server.Tests in 'MCPAuth.OAuth.Server.Tests.pas';
 
 begin
   ReportMemoryLeaksOnShutdown := True;

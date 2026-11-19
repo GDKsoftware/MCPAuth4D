@@ -13,6 +13,7 @@ type
     InvalidGrant = 'invalid_grant';
     UnauthorizedClient = 'unauthorized_client';
     UnsupportedGrantType = 'unsupported_grant_type';
+    UnsupportedResponseType = 'unsupported_response_type';
     InvalidScope = 'invalid_scope';
     InvalidTarget = 'invalid_target';
     AccessDenied = 'access_denied';

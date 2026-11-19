@@ -7,6 +7,8 @@ uses
 
 type
   EAccountLinkedToOtherUser = class(Exception);
+  EAccessDenied = class(Exception);
+  EUserNotFound = class(Exception);
 
 implementation
 

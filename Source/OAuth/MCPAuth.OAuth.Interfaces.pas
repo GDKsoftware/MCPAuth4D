@@ -46,6 +46,33 @@ type
     function DeleteExpired(const NowUtc: TDateTime): Integer;
   end;
 
+  // Every failure raises EOAuthError. During authorize, invalid_client and invalid_redirect_uri
+  // must be shown as an error page and never be redirected to the client.
+  IAuthorizationServer = interface
+    ['{C5A1E847-2F6B-4D93-8B0C-7E4D19A3F562}']
+    function BeginAuthorize(const Request: TAuthorizeRequest): TAuthorizeStart; overload;
+    function BeginAuthorize(const Request: TAuthorizeRequest; const SessionUserId: string): TAuthorizeStart; overload;
+
+    function BeginLogin(const ProviderName: string; const Purpose: TLoginPurpose; const UserId: string = ''): string;
+
+    // Also raises EUpstreamError from the provider and EAccessDenied or EAccountLinkedToOtherUser from the linked accounts.
+    function CompleteUpstream(const ProviderName, State, Code: string): TUpstreamCompletion;
+
+    function ConsentInfo(const PendingId: string): TConsentInfo;
+
+    // Only the user who signed in for this pending authorization may approve it.
+    function Approve(const PendingId, UserId: string): string;
+    function Deny(const PendingId: string): string;
+
+    function ExchangeToken(const Request: TTokenRequest): TTokenResponse;
+
+    // Revokes the whole family of the token; an unknown token is ignored.
+    procedure Revoke(const Token: string);
+
+    // A family of another user is ignored.
+    procedure RevokeFamily(const UserId, FamilyId: string);
+  end;
+
 implementation
 
 end.
