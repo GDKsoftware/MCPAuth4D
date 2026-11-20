@@ -124,6 +124,15 @@ type
 
     [Test]
     procedure ConcurrentSavesAreSafe;
+
+    [Test]
+    procedure UserWithNonAsciiNameRoundTrips;
+
+    [Test]
+    procedure LinkedAccountWithNonAsciiNamesRoundTrips;
+
+    [Test]
+    procedure ClientWithNonAsciiNameRoundTrips;
   end;
 
 implementation
@@ -138,6 +147,10 @@ const
   ThreadCount = 8;
   SavesPerThread = 200;
   SharedTokenHash = 'shared-token';
+  // 'Jos' + e acute + ' M' + u umlaut + 'ller-' + O stroke + 'deg' + a ring + 'rd'
+  LatinName = 'Jos'#$00E9' M'#$00FC'ller-'#$00D8'deg'#$00E5'rd';
+  // C acute + 'wiczenie ' + sharp s + ' ' + euro sign
+  MixedName = #$0106'wiczenie '#$00DF' '#$20AC;
 
 { TStoreContractTests }
 
@@ -756,6 +769,58 @@ begin
   Assert.AreEqual(0, FFailures);
   Assert.AreEqual(1, FConsumeSuccesses);
   Assert.AreEqual(0, CountMissingKeys);
+end;
+
+procedure TStoreContractTests.UserWithNonAsciiNameRoundTrips;
+begin
+  RequireStore;
+
+  var User := Default(TAuthUser);
+  User.Id := 'user-1';
+  User.DisplayName := LatinName;
+  User.CreatedAtUtc := BaseTime;
+  FStores.Users.Save(User);
+
+  var Found: TAuthUser;
+  const IsFound = FStores.Users.TryGet('user-1', Found);
+
+  Assert.IsTrue(IsFound);
+  Assert.AreEqual(LatinName, Found.DisplayName);
+end;
+
+procedure TStoreContractTests.LinkedAccountWithNonAsciiNamesRoundTrips;
+begin
+  RequireStore;
+
+  var Expected := NewAccount('user-1', 'object-1');
+  Expected.DisplayName := LatinName;
+  Expected.UserName := MixedName + '@example.test';
+  FStores.LinkedAccounts.Save(Expected);
+
+  var Actual: TLinkedAccount;
+  const IsFound = FStores.LinkedAccounts.TryFind(Expected.Key, Actual);
+
+  Assert.IsTrue(IsFound);
+  Assert.AreEqual(LatinName, Actual.DisplayName);
+  Assert.AreEqual(Expected.UserName, Actual.UserName);
+end;
+
+procedure TStoreContractTests.ClientWithNonAsciiNameRoundTrips;
+begin
+  RequireStore;
+
+  var Expected := Default(TOAuthClient);
+  Expected.ClientId := 'client-1';
+  Expected.ClientName := MixedName;
+  Expected.RedirectUris := ['https://client.example.test/callback'];
+  Expected.CreatedAtUtc := BaseTime;
+  FStores.Clients.Save(Expected);
+
+  var Actual: TOAuthClient;
+  const IsFound = FStores.Clients.TryGet('client-1', Actual);
+
+  Assert.IsTrue(IsFound);
+  Assert.AreEqual(MixedName, Actual.ClientName);
 end;
 
 end.
