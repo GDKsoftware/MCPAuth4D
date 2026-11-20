@@ -3,6 +3,7 @@ unit MCPAuth.Store.FireDAC.ConnectionFactory;
 interface
 
 uses
+  System.Classes,
   FireDAC.Comp.Client,
   MCPAuth.Store.FireDAC.Interfaces;
 
@@ -16,6 +17,7 @@ type
 
     procedure GuardConnectionString(const ConnectionString: string);
     procedure RegisterDefinition(const ConnectionString: string);
+    procedure DefaultToUtf8(const DriverId: string; const Params: TStrings);
 
   public
     constructor Create(const ConnectionString: string);
@@ -28,7 +30,6 @@ implementation
 
 uses
   System.SysUtils,
-  System.Classes,
   FireDAC.Stan.Def,
   FireDAC.Stan.Async,
   FireDAC.Stan.Pool,
@@ -38,6 +39,9 @@ uses
 const
   DriverIdParam = 'DriverID';
   PooledParam = 'Pooled';
+  PostgresDriverId = 'PG';
+  CharacterSetParam = 'CharacterSet';
+  Utf8CharacterSet = 'UTF8';
   ParamSeparator = ';';
 
 { TFireDACConnectionFactory }
@@ -88,9 +92,21 @@ begin
 
     Params.Values[DriverIdParam] := '';
     Params.Values[PooledParam] := BoolToStr(True, True);
+    DefaultToUtf8(DriverId, Params);
     FDManager.AddConnectionDef(FDefinitionName, DriverId, Params);
   finally
     Params.Free;
+  end;
+end;
+
+// Names and other text from real users are not ASCII; the client encoding must not depend on the server or locale defaults.
+procedure TFireDACConnectionFactory.DefaultToUtf8(const DriverId: string; const Params: TStrings);
+begin
+  const IsPostgres = SameText(DriverId, PostgresDriverId);
+  const HasOwnCharacterSet = not Params.Values[CharacterSetParam].IsEmpty;
+  if (IsPostgres and not HasOwnCharacterSet) then
+  begin
+    Params.Values[CharacterSetParam] := Utf8CharacterSet;
   end;
 end;
 

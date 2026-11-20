@@ -109,7 +109,7 @@ The program uses `TAllowAllAccessPolicy`: every account the upstream provider ac
 - The Microsoft provider is active when the client id is set together with the certificate or the secret. When both credentials are set, the certificate wins and a warning is logged.
 - When the default template or migration folder does not exist next to the executable, the program searches the parent folders. A build started from `bin/<platform>/<config>` therefore uses the `templates/` and `migrations/` folders of the repository.
 - Generate a master key with `openssl rand -base64 32`. To rotate it, move the current key into `MCPAUTH_PREVIOUS_KEYS`, set a new key with a new id and restart. Refresh tokens encrypted with an older key keep working.
-- The listeners close a connection that sends nothing for 30 seconds and accept at most 256 connections each. PostgreSQL connections get `statement_timeout` 30 s and `lock_timeout` 10 s, unless the connection string sets its own `PGAdvanced`.
+- The listeners close a connection that sends nothing for 30 seconds and accept at most 256 connections each. PostgreSQL connections get `statement_timeout` 30 s and `lock_timeout` 10 s, unless the connection string sets its own `PGAdvanced`. The client encoding is set to `CharacterSet=UTF8` unless the connection string sets its own.
 
 ### Entra app registration
 

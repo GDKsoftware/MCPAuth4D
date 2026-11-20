@@ -75,7 +75,10 @@ end;
 
 procedure TFireDACCommand.SetText(const Name, Value: string);
 begin
-  FQuery.ParamByName(Name).AsString := Value;
+  // On Linux an AsString parameter reaches libpq as UTF-16, which PostgreSQL rejects for non-ASCII text.
+  const Param = FQuery.ParamByName(Name);
+  Param.DataType := ftWideString;
+  Param.AsWideString := Value;
 end;
 
 procedure TFireDACCommand.SetLongText(const Name, Value: string);
