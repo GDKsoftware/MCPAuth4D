@@ -99,7 +99,8 @@ end;
 class function TRemoteUpstreamAccounts.BasicAuthorization(const ServiceId, ServiceSecret: string): string;
 begin
   const Credentials = TEncoding.UTF8.GetBytes(Format('%s:%s', [ServiceId, ServiceSecret]));
-  Result := 'Basic ' + TNetEncoding.Base64.EncodeBytesToString(Credentials);
+  // Base64String never wraps lines; TNetEncoding.Base64 breaks the header after 76 characters.
+  Result := 'Basic ' + TNetEncoding.Base64String.EncodeBytesToString(Credentials);
 end;
 
 class function TRemoteUpstreamAccounts.ReasonOf(const Body: string): string;

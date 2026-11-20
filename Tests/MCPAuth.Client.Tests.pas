@@ -38,7 +38,8 @@ type
     function BuildResourceRegistryJson: string;
     function BaseUrl: string;
     function AuthorizerFor(const Resource, ServiceSecret: string; const CacheSeconds: Integer = 60): IMCPAuthorizer;
-    function RemoteAccounts(const ServiceSecret: string = 'secret-a'): IUpstreamAccounts;
+    function RemoteAccounts: IUpstreamAccounts; overload;
+    function RemoteAccounts(const ServiceSecret: string): IUpstreamAccounts; overload;
     function Authorize(const Authorizer: IMCPAuthorizer; const Token: string): TMCPAuthResult;
     procedure CountAndForward(const Path: string);
     procedure SaveToken(const Token, UserId, Resource: string);
@@ -124,7 +125,9 @@ uses
 const
   ResourceA = 'https://a.example.test/mcp';
   ResourceB = 'https://b.example.test/mcp';
-  ServiceSecretA = 'secret-a';
+  // Longer than the secrets of the deploy scripts (openssl rand -base64 32): "service-a:" plus this secret
+  // encodes to more than 76 Base64 characters, where a line-wrapping encoder breaks the Basic header.
+  ServiceSecretA = 'q7Vb3+Zk1T/9mXc0Rr2LwP8sYfN4hJd6aGe5uKiO1QoXy2Wv9Tn+Lm/Ap4Bc8De=';
   ServiceSecretB = 'secret-b';
   FakeProviderName = 'fake';
   TenantId = 'tenant-1';
@@ -219,6 +222,11 @@ begin
   const ServiceId = IfThen(Resource = ResourceA, 'service-a', 'service-b');
 
   Result := TMCPAuthClient.CreateAuthorizer(Resource, BaseUrl, ServiceId, ServiceSecret, CacheSeconds);
+end;
+
+function TClientTests.RemoteAccounts: IUpstreamAccounts;
+begin
+  Result := RemoteAccounts(ServiceSecretA);
 end;
 
 function TClientTests.RemoteAccounts(const ServiceSecret: string): IUpstreamAccounts;
