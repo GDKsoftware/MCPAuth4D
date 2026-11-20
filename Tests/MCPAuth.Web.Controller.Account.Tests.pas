@@ -467,6 +467,7 @@ begin
   Assert.Contains(Response.Body, 'Test Client');
   Assert.Contains(Response.Body, 'family-own');
   Assert.Contains(Response.Body, '2026-01-02T03:04:05Z');
+  Assert.Contains(Response.Body, '2 Jan 2026, 03:04 UTC');
   Assert.Contains(Response.Body, CsrfOf(SessionCookie));
   Assert.Contains(Response.Body, 'value="fake"');
   Assert.IsFalse(Response.Body.Contains('Intruder Name'), 'other user''s account');

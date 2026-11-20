@@ -70,6 +70,15 @@ type
     procedure AccountPageShowsReconnectOnlyWhenNeeded;
 
     [Test]
+    procedure AccountPageCountsTheLinkedAccounts;
+
+    [Test]
+    procedure AccountPageWithoutGrantsSaysSo;
+
+    [Test]
+    procedure AccountPagePutsTheSessionInTheSiteHeader;
+
+    [Test]
     procedure DefaultTemplatesHaveNoExternalResources;
   end;
 
@@ -196,6 +205,7 @@ begin
   Assert.IsTrue(Html.Contains('<title>Problem</title>'));
   Assert.IsTrue(Html.Contains('@media (prefers-color-scheme: dark)'));
   Assert.IsFalse(Html.Contains('PROJECT-LAYOUT'));
+  Assert.IsFalse(Html.Contains('@RenderHeader'), 'a page without a header part leaves no placeholder');
 end;
 
 procedure TWebStencilsPageRendererTests.ProjectLayoutWrapsLibraryPage;
@@ -391,6 +401,56 @@ begin
   const ReconnectForms = Html.Split(['action="/account/reconnect"']);
   Assert.AreEqual<Integer>(2, Length(ReconnectForms), 'exactly one reconnect form is expected');
   Assert.IsTrue(ReconnectForms[1].Contains('key-broken'));
+end;
+
+procedure TWebStencilsPageRendererTests.AccountPageCountsTheLinkedAccounts;
+begin
+  const Renderer = CreateRenderer(False);
+  const Model = TAccountPageModel.Create;
+  FOwnedObjects.Add(Model);
+
+  Model.Accounts := [CreateAccountRow('a', False)];
+  const SingleHtml = Renderer.Render('account.html', Model);
+
+  Model.Accounts := [CreateAccountRow('b', False), CreateAccountRow('c', False), CreateAccountRow('d', False)];
+  const MultipleHtml = Renderer.Render('account.html', Model);
+
+  Assert.IsTrue(SingleHtml.Contains('>1 account<'));
+  Assert.IsTrue(MultipleHtml.Contains('>3 accounts<'));
+end;
+
+procedure TWebStencilsPageRendererTests.AccountPageWithoutGrantsSaysSo;
+begin
+  const Renderer = CreateRenderer(False);
+  const Model = TAccountPageModel.Create;
+  FOwnedObjects.Add(Model);
+
+  const EmptyHtml = Renderer.Render('account.html', Model);
+
+  Model.Grants := [CreateGrantRow('g1')];
+  const GrantHtml = Renderer.Render('account.html', Model);
+
+  Assert.IsTrue(EmptyHtml.Contains('No app has access yet.'));
+  Assert.IsFalse(EmptyHtml.Contains('action="/account/revoke"'));
+  Assert.IsFalse(GrantHtml.Contains('No app has access yet.'));
+  Assert.IsTrue(GrantHtml.Contains('action="/account/revoke"'));
+end;
+
+procedure TWebStencilsPageRendererTests.AccountPagePutsTheSessionInTheSiteHeader;
+begin
+  const Renderer = CreateRenderer(False);
+  const Model = TAccountPageModel.Create;
+  FOwnedObjects.Add(Model);
+  Model.UserDisplayName := 'Pat Example';
+
+  const Html = Renderer.Render('account.html', Model);
+
+  const HeaderStart = Html.IndexOf('<header class="site-head">');
+  const MainStart = Html.IndexOf('<main>');
+  const LogoutForm = Html.IndexOf('action="/logout"');
+  Assert.IsTrue(HeaderStart >= 0, 'site header missing');
+  Assert.IsTrue((LogoutForm > HeaderStart) and (LogoutForm < MainStart), 'log out belongs in the site header');
+  Assert.IsFalse(Html.Contains('@RenderHeader'));
 end;
 
 procedure TWebStencilsPageRendererTests.DefaultTemplatesHaveNoExternalResources;

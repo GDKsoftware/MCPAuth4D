@@ -36,6 +36,7 @@ type
 
     class function WithNoStore(const Response: TWebResponse): TWebResponse; static;
     class function IsoUtc(const ValueUtc: TDateTime): string; static;
+    class function ReadableUtc(const ValueUtc: TDateTime): string; static;
 
     function GuardPage(const Handler: TWebHandler): TWebHandler;
     function RequireSession(const Handler: TSessionHandler; const MissingSession: TWebHandler): TWebHandler;
@@ -119,6 +120,7 @@ const
 
   NoStore = 'no-store';
   IsoUtcFormat = 'yyyy-mm-dd"T"hh":"nn":"ss"Z"';
+  ReadableUtcFormat = 'd mmm yyyy", "hh":"nn" UTC"';
 
   ServerErrorMessage = 'An unexpected error occurred. Please try again later.';
   NoSessionMessage = 'Your session has ended. Please sign in again.';
@@ -139,6 +141,11 @@ end;
 class function TAccountController.IsoUtc(const ValueUtc: TDateTime): string;
 begin
   Result := FormatDateTime(IsoUtcFormat, ValueUtc, TFormatSettings.Invariant);
+end;
+
+class function TAccountController.ReadableUtc(const ValueUtc: TDateTime): string;
+begin
+  Result := FormatDateTime(ReadableUtcFormat, ValueUtc, TFormatSettings.Invariant);
 end;
 
 constructor TAccountController.Create(const Server: IAuthorizationServer;
@@ -333,10 +340,11 @@ begin
   begin
     const Row = TGrantRow.Create;
     Model.Grants := Model.Grants + [Row];
-    Row.FamilyId     := Family.FamilyId;
-    Row.ResourceName := ResourceNameOf(Family.Resource);
-    Row.ClientName   := ClientNameOf(Family.ClientId);
-    Row.CreatedAt    := IsoUtc(Family.CreatedAtUtc);
+    Row.FamilyId      := Family.FamilyId;
+    Row.ResourceName  := ResourceNameOf(Family.Resource);
+    Row.ClientName    := ClientNameOf(Family.ClientId);
+    Row.CreatedAt     := IsoUtc(Family.CreatedAtUtc);
+    Row.CreatedAtText := ReadableUtc(Family.CreatedAtUtc);
   end;
 end;
 

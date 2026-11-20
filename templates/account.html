@@ -1,33 +1,38 @@
 @LayoutPage layout.html
-<section class="card">
-  <h1>Your account</h1>
-  <p>Signed in as <strong>@page.UserDisplayName</strong>.</p>
+@ExtraHeader {
+<div class="session">
+  <span class="session-user">@page.UserDisplayName</span>
   <form method="post" action="/logout">
     <input type="hidden" name="csrf" value="@page.Csrf">
     <button type="submit">Log out</button>
   </form>
-</section>
-
-<section class="card" aria-labelledby="accounts-heading">
-  <h2 id="accounts-heading">Linked accounts</h2>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr><th scope="col">Name</th><th scope="col">User name</th><th scope="col">Status</th><th scope="col">Actions</th></tr>
-      </thead>
-      <tbody>
-@foreach (var account in accounts) {
-        <tr>
-          <td>@account.DisplayName</td>
-          <td>@account.UserName</td>
-          <td>
-@if account.NeedsReconnect {
-            <span class="badge">Needs reconnect</span>
-} @else {
-            Connected
+</div>
 }
-          </td>
-          <td>
+<div class="account-page">
+  <section class="intro">
+    <h1>Your account</h1>
+    <p class="lead">Signed in as <strong>@page.UserDisplayName</strong>. Here you choose which accounts your connectors may use, and which apps have access.</p>
+  </section>
+
+  <div class="account-columns">
+    <section class="card linked-accounts" aria-labelledby="accounts-heading">
+      <div class="card-head">
+        <h2 id="accounts-heading">Linked accounts</h2>
+        <p class="muted">@page.AccountCountText</p>
+      </div>
+      <ul class="row-list">
+@foreach (var account in accounts) {
+        <li class="account-row">
+          <div class="account-name">
+            <div class="name">@account.DisplayName</div>
+            <div class="muted user-name">@account.UserName</div>
+          </div>
+          <div class="account-state">
+@if account.NeedsReconnect {
+            <span class="status status-attention"><span class="dot" aria-hidden="true"></span>Needs reconnect</span>
+} @else {
+            <span class="status"><span class="dot" aria-hidden="true"></span>Connected</span>
+}
             <div class="actions">
 @if account.NeedsReconnect {
               <form method="post" action="/account/reconnect">
@@ -39,49 +44,49 @@
               <form method="post" action="/account/unlink">
                 <input type="hidden" name="key" value="@account.Key">
                 <input type="hidden" name="csrf" value="@page.Csrf">
-                <button type="submit" class="danger">Unlink</button>
+                <button type="submit">Unlink</button>
               </form>
             </div>
-          </td>
-        </tr>
+          </div>
+        </li>
 }
-      </tbody>
-    </table>
-  </div>
-  <div class="actions">
+      </ul>
+      <div class="link-actions">
 @foreach (var provider in providers) {
-    <form method="post" action="/account/link">
-      <input type="hidden" name="provider" value="@provider.Name">
-      <input type="hidden" name="csrf" value="@page.Csrf">
-      <button type="submit">Link another account (@provider.Name)</button>
-    </form>
+        <form method="post" action="/account/link">
+          <input type="hidden" name="provider" value="@provider.Name">
+          <input type="hidden" name="csrf" value="@page.Csrf">
+          <button type="submit" class="primary">Link a @provider.Name account</button>
+        </form>
 }
-  </div>
-</section>
+      </div>
+    </section>
 
-<section class="card" aria-labelledby="grants-heading">
-  <h2 id="grants-heading">Granted access</h2>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr><th scope="col">Resource</th><th scope="col">Application</th><th scope="col">Granted</th><th scope="col">Actions</th></tr>
-      </thead>
-      <tbody>
+    <section class="card granted-access" aria-labelledby="grants-heading">
+      <h2 id="grants-heading">Granted access</h2>
+      <p class="muted">Apps that can use your linked accounts.</p>
+@if page.HasGrants {
+      <ul class="grant-list">
 @foreach (var grant in grants) {
-        <tr>
-          <td>@grant.ResourceName</td>
-          <td>@grant.ClientName</td>
-          <td>@grant.CreatedAt</td>
-          <td>
-            <form method="post" action="/account/revoke">
-              <input type="hidden" name="family" value="@grant.FamilyId">
-              <input type="hidden" name="csrf" value="@page.Csrf">
-              <button type="submit" class="danger">Revoke</button>
-            </form>
-          </td>
-        </tr>
+        <li class="grant">
+          <h3>@grant.ResourceName</h3>
+          <dl>
+            <dt>Application</dt>
+            <dd>@grant.ClientName</dd>
+            <dt>Granted</dt>
+            <dd><time datetime="@grant.CreatedAt">@grant.CreatedAtText</time></dd>
+          </dl>
+          <form method="post" action="/account/revoke">
+            <input type="hidden" name="family" value="@grant.FamilyId">
+            <input type="hidden" name="csrf" value="@page.Csrf">
+            <button type="submit">Revoke access</button>
+          </form>
+        </li>
 }
-      </tbody>
-    </table>
+      </ul>
+} @else {
+      <p class="empty">No app has access yet.</p>
+}
+    </section>
   </div>
-</section>
+</div>
