@@ -47,12 +47,14 @@ type
     FResourceName: string;
     FClientName: string;
     FCreatedAt: string;
+    FCreatedAtText: string;
 
   public
     property FamilyId: string read FFamilyId write FFamilyId;
     property ResourceName: string read FResourceName write FResourceName;
     property ClientName: string read FClientName write FClientName;
     property CreatedAt: string read FCreatedAt write FCreatedAt;
+    property CreatedAtText: string read FCreatedAtText write FCreatedAtText;
   end;
 
   TProviderRow = class
@@ -72,11 +74,16 @@ type
     FGrants: TArray<TGrantRow>;
     FProviders: TArray<string>;
 
+    function GetAccountCountText: string;
+    function GetHasGrants: Boolean;
+
   public
     property UserDisplayName: string read FUserDisplayName write FUserDisplayName;
     property Accounts: TArray<TAccountRow> read FAccounts write FAccounts;
     property Grants: TArray<TGrantRow> read FGrants write FGrants;
     property Providers: TArray<string> read FProviders write FProviders;
+    property AccountCountText: string read GetAccountCountText;
+    property HasGrants: Boolean read GetHasGrants;
   end;
 
   TLoginPageModel = class(TPageModel)
@@ -105,12 +112,35 @@ type
 
 implementation
 
+uses
+  System.SysUtils;
+
+const
+  OneAccountText = '1 account';
+  AccountCountFormat = '%d accounts';
+
 { TProviderRow }
 
 constructor TProviderRow.Create(const Name: string);
 begin
   inherited Create;
   FName := Name;
+end;
+
+{ TAccountPageModel }
+
+function TAccountPageModel.GetAccountCountText: string;
+begin
+  const Count = Length(FAccounts);
+  if Count = 1 then
+    Exit(OneAccountText);
+
+  Result := Format(AccountCountFormat, [Count]);
+end;
+
+function TAccountPageModel.GetHasGrants: Boolean;
+begin
+  Result := (Length(FGrants) > 0);
 end;
 
 end.
