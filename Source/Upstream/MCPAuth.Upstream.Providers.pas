@@ -14,9 +14,10 @@ type
     FNames: TArray<string>;
 
     class function KeyOf(const Name: string): string; static;
+    class procedure GuardName(const Name: string); static;
 
   public
-    // Raises EArgumentException when two providers share a name.
+    // Raises EArgumentException when two providers share a name, or when a name contains ':', the separator of account keys.
     constructor Create(const Providers: TArray<IUpstreamProvider>);
 
     function TryGet(const Name: string; out Provider: IUpstreamProvider): Boolean;
@@ -26,13 +27,20 @@ type
 implementation
 
 uses
-  System.SysUtils;
+  System.SysUtils,
+  MCPAuth.Identity.Types;
 
 { TUpstreamProviders }
 
 class function TUpstreamProviders.KeyOf(const Name: string): string;
 begin
   Result := Name.ToLowerInvariant;
+end;
+
+class procedure TUpstreamProviders.GuardName(const Name: string);
+begin
+  if Name.Contains(AccountKeySeparator) then
+    raise EArgumentException.CreateFmt('Upstream provider name "%s" contains "%s"', [Name, AccountKeySeparator]);
 end;
 
 constructor TUpstreamProviders.Create(const Providers: TArray<IUpstreamProvider>);
@@ -42,6 +50,8 @@ begin
   FProviders := TCollections.CreateDictionary<string, IUpstreamProvider>;
   for var Provider in Providers do
   begin
+    GuardName(Provider.Name);
+
     const Key = KeyOf(Provider.Name);
     if FProviders.ContainsKey(Key) then
       raise EArgumentException.CreateFmt('Upstream provider "%s" is registered twice', [Provider.Name]);

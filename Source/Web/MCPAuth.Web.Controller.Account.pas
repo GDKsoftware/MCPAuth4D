@@ -454,7 +454,7 @@ begin
   Account := Default(TLinkedAccount);
   for var Candidate in FAccounts.ListForUser(UserId) do
   begin
-    const IsRequested = SameText(Candidate.Key.Value, KeyValue);
+    const IsRequested = (Candidate.Key.Value = KeyValue);
     if IsRequested then
     begin
       Account := Candidate;

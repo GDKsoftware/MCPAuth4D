@@ -5,6 +5,7 @@ interface
 uses
   DUnitX.TestFramework,
   MCPAuth.Clock.Interfaces,
+  MCPAuth.Identity.Types,
   MCPAuth.Store.Interfaces,
   MCPAuth.Store.Contract.Tests,
   MCPAuth.Store.FireDAC.Interfaces,
@@ -21,6 +22,8 @@ type
     procedure RecreateSchema;
     procedure ClearTables;
     procedure AssertStoredAsUtc(const Factory: IFireDACConnectionFactory);
+    function SaveAccount(const Stores: TStoreSet; const Provider, TenantId, ObjectId: string): TAccountKey;
+    procedure RerunAccountKeyMigration;
 
   protected
     function CreateStore(const Clock: IClock): TStoreSet; override;
@@ -38,6 +41,9 @@ type
 
     [Test]
     procedure TimesStayUtcInAnotherSessionTimeZone;
+
+    [Test]
+    procedure AccountKeyMigrationKeepsCaseOfObjectIds;
   end;
 
 implementation
@@ -59,6 +65,8 @@ const
   UtcTokenHash = 'utc-token';
   // 2026-06-01 12:00:00 UTC
   UtcExpiryUnix = 1780315200;
+  AccountKeyMigrationVersion = 4;
+  Dialect = 'postgres';
 
 { TFireDACStoreContractTests }
 
@@ -104,7 +112,7 @@ begin
     TTestPostgres.Execute(FFactory, Format('DROP TABLE IF EXISTS %s', [Table]));
   end;
   TTestPostgres.Execute(FFactory, Format('DROP TABLE IF EXISTS %s', [VersionTable]));
-  TFireDACMigrations.Apply(FFactory, 'postgres', TTestPostgres.MigrationsPath);
+  TFireDACMigrations.Apply(FFactory, Dialect, TTestPostgres.MigrationsPath);
 end;
 
 procedure TFireDACStoreContractTests.ClearTables;
@@ -156,6 +164,47 @@ begin
   Assert.IsTrue(IsFound);
   Assert.AreEqual<TDateTime>(ExpiresAtUtc, Read.ExpiresAtUtc);
   Assert.AreEqual<Int64>(UtcExpiryUnix, StoredUnix);
+end;
+
+procedure TFireDACStoreContractTests.AccountKeyMigrationKeepsCaseOfObjectIds;
+begin
+  RequireStore;
+
+  const Clock: IClock = TFakeClock.Create(EncodeDateTime(2026, 6, 1, 12, 0, 0, 0));
+  const Stores = CreateStore(Clock);
+  const MixedCase = SaveAccount(Stores, 'acme', '', '00u1AbcDEF');
+  const Guid = SaveAccount(Stores, 'microsoft', '72F988BF-86F1-41AF-91AB-2D7CD011DB47', '0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9');
+  const LowerCase = SaveAccount(Stores, 'acme', '', 'plain-subject');
+  TTestPostgres.Execute(FFactory, 'UPDATE mcpauth_linked_accounts SET account_key = lower(account_key)');
+
+  RerunAccountKeyMigration;
+
+  var Account: TLinkedAccount;
+  Assert.IsTrue(Stores.LinkedAccounts.TryFind(MixedCase, Account), 'mixed-case object id rekeyed');
+  Assert.IsTrue(Account.NeedsReconnect, 'rekeyed account needs a reconnect');
+  Assert.IsTrue(Stores.LinkedAccounts.TryFind(Guid, Account), 'guid object id kept');
+  Assert.IsFalse(Account.NeedsReconnect, 'guid account unchanged');
+  Assert.IsTrue(Stores.LinkedAccounts.TryFind(LowerCase, Account), 'lower-case object id kept');
+  Assert.IsFalse(Account.NeedsReconnect, 'lower-case account unchanged');
+end;
+
+function TFireDACStoreContractTests.SaveAccount(const Stores: TStoreSet; const Provider, TenantId, ObjectId: string): TAccountKey;
+begin
+  Result.Provider := Provider;
+  Result.TenantId := TenantId;
+  Result.ObjectId := ObjectId;
+
+  var Account := Default(TLinkedAccount);
+  Account.Key                   := Result;
+  Account.UserId                := Format('user-%s', [ObjectId]);
+  Account.ProtectedRefreshToken := TBytes.Create(1, 2, 3);
+  Stores.LinkedAccounts.Save(Account);
+end;
+
+procedure TFireDACStoreContractTests.RerunAccountKeyMigration;
+begin
+  TTestPostgres.Execute(FFactory, Format('DELETE FROM %s WHERE version = %d', [VersionTable, AccountKeyMigrationVersion]));
+  TFireDACMigrations.Apply(FFactory, Dialect, TTestPostgres.MigrationsPath);
 end;
 
 end.

@@ -23,6 +23,9 @@ type
 
     [Test]
     procedure DuplicateNameRaises;
+
+    [Test]
+    procedure NameWithAccountKeySeparatorRaises;
   end;
 
 implementation
@@ -94,6 +97,19 @@ begin
     procedure
     begin
       TUpstreamProviders.Create(Duplicates).Free;
+    end,
+    EArgumentException);
+end;
+
+procedure TUpstreamProvidersTests.NameWithAccountKeySeparatorRaises;
+begin
+  const Provider: IUpstreamProvider = TFakeUpstreamProvider.Create('acme:eu');
+  const Providers: TArray<IUpstreamProvider> = [Provider];
+
+  Assert.WillRaise(
+    procedure
+    begin
+      TUpstreamProviders.Create(Providers).Free;
     end,
     EArgumentException);
 end;

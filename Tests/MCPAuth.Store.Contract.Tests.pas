@@ -63,6 +63,9 @@ type
     procedure SavingKeyOfOtherUserRaises;
 
     [Test]
+    procedure AccountsDifferingOnlyInObjectIdCaseAreSeparate;
+
+    [Test]
     procedure ListForUserReturnsOnlyOwnAccounts;
 
     [Test]
@@ -333,6 +336,25 @@ begin
   Assert.IsTrue(FStores.LinkedAccounts.TryFind(Original.Key, Actual));
   Assert.AreEqual('user-1', Actual.UserId);
   Assert.AreEqual(Original.DisplayName, Actual.DisplayName);
+end;
+
+procedure TStoreContractTests.AccountsDifferingOnlyInObjectIdCaseAreSeparate;
+begin
+  RequireStore;
+
+  const Upper = NewAccount('user-1', 'Subject:A');
+  const Lower = NewAccount('user-2', Upper.Key.ObjectId.ToLowerInvariant);
+
+  FStores.LinkedAccounts.Save(Upper);
+  FStores.LinkedAccounts.Save(Lower);
+
+  var Found: TLinkedAccount;
+  Assert.IsTrue(FStores.LinkedAccounts.TryFind(Upper.Key, Found));
+  Assert.AreEqual('user-1', Found.UserId);
+  Assert.AreEqual(Upper.Key.ObjectId, Found.Key.ObjectId, False);
+  Assert.IsTrue(FStores.LinkedAccounts.TryFind(Lower.Key, Found));
+  Assert.AreEqual('user-2', Found.UserId);
+  Assert.AreEqual(Lower.Key.ObjectId, Found.Key.ObjectId, False);
 end;
 
 procedure TStoreContractTests.ListForUserReturnsOnlyOwnAccounts;

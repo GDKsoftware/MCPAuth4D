@@ -33,7 +33,6 @@ type
     class function ReplyError(const StatusCode: Integer; const ErrorCode: string): TWebResponse; static;
     class function InactiveToken: TWebResponse; static;
     class function ToUnixSeconds(const ValueUtc: TDateTime): Int64; static;
-    class function TryParseAccountKey(const Value: string; out Key: TAccountKey): Boolean; static;
     class function FindProvider(const Resource: TResourceDefinition; const ProviderName: string; out Provider: TResourceProvider): Boolean; static;
     class function IsServedBy(const Resource: TResourceDefinition; const ProviderName: string): Boolean; static;
     class function ReadStringField(const Body: TJSONObject; const Name: string): string; static;
@@ -76,8 +75,6 @@ const
   ChallengeValue = 'Basic realm="mcpauth"';
   CacheControlHeader = 'Cache-Control';
   NoStore = 'no-store';
-  KeySeparator = ':';
-  KeyPartCount = 3;
   StatusOk = 200;
   StatusBadRequest = 400;
   StatusUnauthorized = 401;
@@ -154,20 +151,6 @@ end;
 class function TInternalController.ToUnixSeconds(const ValueUtc: TDateTime): Int64;
 begin
   Result := DateTimeToUnix(ValueUtc, True);
-end;
-
-class function TInternalController.TryParseAccountKey(const Value: string; out Key: TAccountKey): Boolean;
-begin
-  Key := Default(TAccountKey);
-
-  const Parts = Value.Split([KeySeparator]);
-  Result := (Length(Parts) = KeyPartCount);
-  if Result then
-  begin
-    Key.Provider := Parts[0];
-    Key.TenantId := Parts[1];
-    Key.ObjectId := Parts[2];
-  end;
 end;
 
 class function TInternalController.FindProvider(const Resource: TResourceDefinition; const ProviderName: string; out Provider: TResourceProvider): Boolean;
@@ -327,7 +310,7 @@ begin
       Exit(ReplyError(StatusBadRequest, 'invalid_request'));
 
     var Key: TAccountKey;
-    if not TryParseAccountKey(AccountValue, Key) then
+    if not TAccountKey.TryParse(AccountValue, Key) then
       Exit(ReplyError(StatusNotFound, 'account_not_found'));
 
     // Both forbidden cases come before any lookup of the account, so they reveal nothing about it.
