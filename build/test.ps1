@@ -1,9 +1,9 @@
 # Builds Tests/MCPAuth.Tests.dpr and runs it; exits non-zero when the build or a test fails.
-#   powershell -File build/test.ps1 [-Platform Win64|Linux64]
+#   powershell -File build/test.ps1 [-Platform Win32|Win64|Linux64]
 # Linux64 tests run inside WSL (distro from WSL_DISTRO, see env.ps1) against the system libcrypto.so.3.
 # With MCPAUTH_TEST_PG set the FireDAC store tests run against that PostgreSQL database (see build/docker-compose.yml):
-# on Win64 libpq.dll comes from PG_BIN_DIR, on Linux64 the system libpq.so.5 of the WSL distro is used.
-param([ValidateSet('Win64', 'Linux64')] [string] $Platform = 'Win64')
+# on Windows libpq.dll comes from PG_BIN_DIR (32-bit for Win32), on Linux64 the system libpq.so.5 of the WSL distro is used.
+param([ValidateSet('Win32', 'Win64', 'Linux64')] [string] $Platform = 'Win64')
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'env.ps1')
 

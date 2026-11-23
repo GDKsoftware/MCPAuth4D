@@ -90,6 +90,9 @@ type
     procedure UnlinkRemovesTheAccount;
 
     [Test]
+    procedure UnlinkRemovesOnlyTheAccountWithThatExactKey;
+
+    [Test]
     procedure UnlinkLastAccountShowsError;
 
     [Test]
@@ -554,6 +557,23 @@ begin
   Assert.AreEqual(StatusFound, Response.StatusCode, Response.Body);
   Assert.AreEqual('/account', Response.Location);
   Assert.AreEqual<Integer>(1, CountAccounts(UserId));
+end;
+
+procedure TAccountControllerTests.UnlinkRemovesOnlyTheAccountWithThatExactKey;
+begin
+  const SessionCookie = SignInAs(FirstObjectId, 'Test User', 'user@example.test');
+  const UserId = UserIdOf(SessionCookie);
+  const UpperKey = UserKey('Subject-A');
+  const LowerKey = UserKey('subject-a');
+  AddAccount(UserId, UpperKey.ObjectId, 'Upper Subject');
+  AddAccount(UserId, LowerKey.ObjectId, 'Lower Subject');
+
+  const Response = PostForm('/account/unlink', KeyAndCsrfBody(LowerKey, CsrfOf(SessionCookie)), SessionCookie);
+
+  Assert.AreEqual(StatusFound, Response.StatusCode, Response.Body);
+  var Account: TLinkedAccount;
+  Assert.IsTrue(FStores.LinkedAccounts.TryFind(UpperKey, Account), 'other account kept');
+  Assert.IsFalse(FStores.LinkedAccounts.TryFind(LowerKey, Account), 'requested account removed');
 end;
 
 procedure TAccountControllerTests.UnlinkLastAccountShowsError;

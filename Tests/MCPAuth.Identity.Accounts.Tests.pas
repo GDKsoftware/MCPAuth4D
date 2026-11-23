@@ -68,6 +68,9 @@ type
     procedure SecondLoginWithSameAccountYieldsSameUser;
 
     [Test]
+    procedure ObjectIdsDifferingOnlyInCaseAreSeparateUsers;
+
+    [Test]
     procedure LinkAddsAccountToUser;
 
     [Test]
@@ -226,6 +229,24 @@ begin
   const Context = Format('%s|%s', [First.Id, Account.Key.Value]);
   Assert.AreEqual('refresh-2', FProtector.Unprotect(Account.ProtectedRefreshToken, Context));
   Assert.AreEqual('openid offline_access mail.read', Account.GrantedScopes);
+end;
+
+procedure TLinkedAccountsTests.ObjectIdsDifferingOnlyInCaseAreSeparateUsers;
+begin
+  const FirstTokens = TokensFor('00u1AbcDEF', 'refresh-1');
+  const SecondTokens = TokensFor('00u1abcdef', 'refresh-2');
+
+  const First = FAccounts.ResolveOrCreateUser(FirstTokens);
+  const Second = FAccounts.ResolveOrCreateUser(SecondTokens);
+
+  Assert.AreNotEqual(First.Id, Second.Id);
+  Assert.AreEqual<Integer>(1, FAccounts.ListForUser(First.Id).Count);
+  Assert.AreEqual<Integer>(1, FAccounts.ListForUser(Second.Id).Count);
+
+  var FirstAccount: TLinkedAccount;
+  Assert.IsTrue(FStores.LinkedAccounts.TryFind(FirstTokens.Identity.Key, FirstAccount));
+  const Context = Format('%s|%s', [First.Id, FirstAccount.Key.Value]);
+  Assert.AreEqual('refresh-1', FProtector.Unprotect(FirstAccount.ProtectedRefreshToken, Context));
 end;
 
 procedure TLinkedAccountsTests.LinkAddsAccountToUser;

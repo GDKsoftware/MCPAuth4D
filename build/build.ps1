@@ -1,9 +1,9 @@
 # Builds a Delphi program of this repository with the command-line compiler.
-#   powershell -File build/build.ps1 [-Project Tests/MCPAuth.Tests.dpr] [-Platform Win64|Linux64] [-Config Debug|Release]
+#   powershell -File build/build.ps1 [-Project Tests/MCPAuth.Tests.dpr] [-Platform Win32|Win64|Linux64] [-Config Debug|Release]
 # Fails on compile errors and on any hint or warning in this repository's own code.
 param(
   [string] $Project = 'Tests/MCPAuth.Tests.dpr',
-  [ValidateSet('Win64', 'Linux64')] [string] $Platform = 'Win64',
+  [ValidateSet('Win32', 'Win64', 'Linux64')] [string] $Platform = 'Win64',
   [ValidateSet('Debug', 'Release')] [string] $Config = 'Debug'
 )
 $ErrorActionPreference = 'Stop'
@@ -30,14 +30,29 @@ $includeOnlyRoots = @(
   "$env:BDS_ROOT\source\Indy10\Protocols"
 )
 
-# OpenSSL 3 for Win64, copied next to the executable. The first folder holding both libraries wins.
-$openSslFiles = @('libcrypto-3-x64.dll', 'libssl-3-x64.dll')
-$openSslCandidates = @(
-  $env:OPENSSL_DIR,
-  'C:\Program Files\OpenSSL-Win64\bin',
-  'C:\Program Files\Git\mingw64\bin',
-  'C:\Program Files\Git\ucrt64\bin'
-)
+# OpenSSL 3 per Windows platform, copied next to the executable. The first folder holding both libraries wins.
+$openSsl = @{
+  Win64 = @{
+    Variable   = 'OPENSSL_DIR'
+    Files      = @('libcrypto-3-x64.dll', 'libssl-3-x64.dll')
+    Candidates = @(
+      $env:OPENSSL_DIR,
+      'C:\Program Files\OpenSSL-Win64\bin',
+      'C:\Program Files\Git\mingw64\bin',
+      'C:\Program Files\Git\ucrt64\bin'
+    )
+  }
+  Win32 = @{
+    Variable   = 'OPENSSL_DIR_WIN32'
+    Files      = @('libcrypto-3.dll', 'libssl-3.dll')
+    Candidates = @(
+      $env:OPENSSL_DIR_WIN32,
+      'C:\Program Files (x86)\OpenSSL-Win32\bin',
+      'C:\Program Files\OpenSSL-Win32\bin',
+      'C:\Program Files\Git\mingw32\bin'
+    )
+  }
+}
 
 function Get-UnitFolders([string] $Path, [bool] $IsLibrary) {
   if (-not (Test-Path $Path)) {
@@ -58,8 +73,9 @@ function Get-CompilerSettings([string] $TargetPlatform) {
       Arguments  = @("--syslibroot:$($env:LINUX_SDK_ROOT)", "--libpath:$($env:LINUX_SDK_LIBPATH)")
     }
   }
+  $windowsCompilers = @{ Win32 = 'dcc32.exe'; Win64 = 'dcc64.exe' }
   return @{
-    Compiler   = 'dcc64.exe'
+    Compiler   = $windowsCompilers[$TargetPlatform]
     Namespaces = 'System;Xml;Data;Datasnap;Web;Soap;Winapi;System.Win'
     Arguments  = @()
   }
@@ -78,18 +94,18 @@ function Test-OwnSourceMessage([string] $Line, [string[]] $OwnFileNames) {
   return $OwnFileNames -contains [IO.Path]::GetFileName($file)
 }
 
-function Copy-OpenSslLibraries([string] $TargetFolder) {
-  foreach ($candidate in $openSslCandidates) {
+function Copy-OpenSslLibraries([hashtable] $Libraries, [string] $TargetFolder) {
+  foreach ($candidate in $Libraries.Candidates) {
     if (-not $candidate) { continue }
-    $paths = $openSslFiles | ForEach-Object { Join-Path $candidate $_ }
-    $allPresent = @($paths | Where-Object { Test-Path $_ }).Count -eq $openSslFiles.Count
+    $paths = $Libraries.Files | ForEach-Object { Join-Path $candidate $_ }
+    $allPresent = @($paths | Where-Object { Test-Path $_ }).Count -eq $Libraries.Files.Count
     if ($allPresent) {
       $paths | ForEach-Object { Copy-Item $_ $TargetFolder -Force }
       Write-Host "Copied OpenSSL from $candidate"
       return
     }
   }
-  Write-Warning 'OpenSSL 3 (libcrypto-3-x64.dll, libssl-3-x64.dll) not found; set OPENSSL_DIR in build/env.local.ps1'
+  Write-Warning "OpenSSL 3 ($($Libraries.Files -join ', ')) not found; set $($Libraries.Variable) in build/env.local.ps1"
 }
 
 $projectPath = (Resolve-Path (Join-Path $root $Project)).Path
@@ -127,5 +143,5 @@ $output | Where-Object { ($_ -match '\b(Error|Fatal)\b') -or ($ownMessages -cont
 if ($exitCode -ne 0) { throw "Compilation of $projectName for $Platform failed (exit $exitCode)" }
 if ($ownMessages.Count -gt 0) { throw "Compilation of $projectName for $Platform produced $($ownMessages.Count) hint(s)/warning(s) in own code" }
 
-if ($Platform -eq 'Win64') { Copy-OpenSslLibraries $outputFolder }
+if ($openSsl.ContainsKey($Platform)) { Copy-OpenSslLibraries $openSsl[$Platform] $outputFolder }
 Write-Host "Built $projectName ($Platform $Config) -> $outputFolder"

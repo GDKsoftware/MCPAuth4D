@@ -81,6 +81,9 @@ type
     procedure UpstreamTokenReturnsAccessToken;
 
     [Test]
+    procedure UpstreamTokenForListedKeyWithColonsInObjectIdReturnsAccessToken;
+
+    [Test]
     procedure UpstreamTokenForResourceWithoutConsentIsForbidden;
 
     [Test]
@@ -138,6 +141,7 @@ const
   KeyLength = 32;
   UserOne = 'user-1';
   UserTwo = 'user-2';
+  ObjectIdWithColons = 'f:Realm:Carol';
   AccessTokenValue = 'access-token-1';
   RefreshTokenValue = 'refresh-token-1';
   StatusOk = 200;
@@ -431,6 +435,26 @@ begin
   finally
     Json.Free;
   end;
+end;
+
+procedure TInternalControllerTests.UpstreamTokenForListedKeyWithColonsInObjectIdReturnsAccessToken;
+begin
+  LinkFakeAccount(UserOne, ObjectIdWithColons);
+  SaveToken(AccessTokenValue, UserOne, ResourceA, TTokenKind.Access);
+  const Listed = CallAsA('/internal/accounts', '{"sub":"user-1"}');
+  const Accounts = TJSONObject.ParseJSONValue(Listed.Body) as TJSONArray;
+  var Key: string;
+  try
+    const Account = Accounts.Items[0];
+    Key := Account.GetValue<string>('key');
+  finally
+    Accounts.Free;
+  end;
+
+  const Response = CallAsA('/internal/upstream-token', Format('{"sub":"user-1","account":"%s"}', [Key]));
+
+  Assert.AreEqual(Format('%s:%s:%s', [FakeProviderName, TenantId, ObjectIdWithColons]), Key, False);
+  Assert.AreEqual(StatusOk, Response.StatusCode, Response.Body);
 end;
 
 procedure TInternalControllerTests.UpstreamTokenForResourceWithoutConsentIsForbidden;
