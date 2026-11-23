@@ -49,13 +49,14 @@ MCPAuth4D lets several MCP servers share one OAuth 2.1 authorization server. Use
 - **Resource registry.** A JSON file lists every MCP server (resource) that may use the auth server: its canonical URI, its display name, its service id with the SHA-256 of its service secret, and the upstream scopes it needs. A token is issued for exactly one resource; introspection by another resource answers `active: false`.
 - **Users and identity.** The auth server keeps its own users. The first sign-in with an upstream account creates a user; a later sign-in with any account linked to that user signs in as that user, so every linked account is a way in and the user is as safe as the weakest of them. An account belongs to one user only: linking an account that another user already has fails. Linking happens on the account page, for the user of the signed-in session, and every MCP client token is issued for that same user, so an MCP server only ever sees the linked accounts of the user behind the token. The Microsoft provider signs in through the `organizations` endpoint: work or school accounts only, no personal Microsoft accounts.
 - **Linked accounts.** Every upstream account a user signs in with or links is stored with its refresh token, encrypted with AES-256-GCM. MCP servers ask for an upstream access token per account; the auth server refreshes it when needed. When the upstream consent was revoked, or a resource needs more scopes than the account granted, the answer is `reconnect_required` and the account page shows "Reconnect".
+- **Account keys.** A linked account is identified by its key `<provider>:<tenant id>:<object id>`: for the Microsoft provider the `tid` and `oid` claims, for a generic OAuth provider an empty tenant and the `sub` claim. The provider name and the tenant id are compared case-insensitively. The object id keeps its case and may contain `:`; only an object id in GUID form is compared case-insensitively. A provider name may not contain `:`.
 - **Sensitive values.** Tokens, codes, session ids and service secrets are stored only as SHA-256 hashes (base64url). Logs and error messages never carry a token, code, secret, key or e-mail address.
 - **Revocation delay.** An MCP server caches a positive introspection result for up to 60 seconds, so a revoked token can keep working at that MCP server for up to a minute.
 - **Security notes.** [docs/security.md](docs/security.md) describes the sign-in binding, cookies, refresh-token rotation, caches, upstream scopes, cleanup and the known limits.
 
 ## Requirements
 
-- Delphi 12.2 or newer. Developed and tested with Delphi 13 on Win64 and Linux64.
+- Delphi 12.2 or newer. Developed and tested with Delphi 13 on Win32, Win64 and Linux64.
 - Git submodules in `lib/`: [Delphi-MCP-Server](https://github.com/GDKsoftware/Delphi-MCP-Server), [Spring4D](https://bitbucket.org/sglienke/spring4d) and [TaurusTLS](https://github.com/JPeterMugaas/TaurusTLS).
 - The libraries listed under [Operating system dependencies](#operating-system-dependencies).
 
@@ -146,7 +147,7 @@ The registry is read at startup; restart the server after a change.
 
 ## Hooking an MCP server in
 
-An MCP server built on [Delphi-MCP-Server](https://github.com/GDKsoftware/Delphi-MCP-Server) needs only the units in `Source/Client`, plus their dependencies in `Source/Clock` and `Source/Secret`. `Examples/WhoAmI` is a complete example.
+An MCP server built on [Delphi-MCP-Server](https://github.com/GDKsoftware/Delphi-MCP-Server) needs the units in `Source/Client`, plus `MCPAuth.Clock` and `MCPAuth.Clock.Interfaces` from `Source/Clock` and `MCPAuth.Secret.Hash` from `Source/Secret`. The client units also use [Spring4D](https://bitbucket.org/sglienke/spring4d) (`Spring.Collections`) and Delphi-MCP-Server (`MCPServer.Authorization`), so both must be on the search path. The client units themselves do not use TaurusTLS or OpenSSL. `Examples/WhoAmI` is a complete example.
 
 ```delphi
 uses
@@ -284,18 +285,20 @@ There is no CI: the tests run locally. The scripts call the command-line compile
 
 ```
 powershell -File build/test.ps1 -Platform Win64
+powershell -File build/test.ps1 -Platform Win32
 powershell -File build/test.ps1 -Platform Linux64
 ```
 
-`build/test.ps1` builds `Tests/MCPAuth.Tests.dpr` and runs it. It exits non-zero when the build fails, when the compiler reports a hint or warning in this repository's own code, or when a test fails. `build/build.ps1 -Project <path.dpr> -Platform Win64|Linux64 -Config Debug|Release` builds any program of the repository, such as `Server/MCPAuthServer.dpr` or `Examples/WhoAmI/WhoAmIServer.dpr`; the output goes to `bin/<Platform>/<Config>`.
+`build/test.ps1` builds `Tests/MCPAuth.Tests.dpr` and runs it. It exits non-zero when the build fails, when the compiler reports a hint or warning in this repository's own code, or when a test fails. `build/build.ps1 -Project <path.dpr> -Platform Win32|Win64|Linux64 -Config Debug|Release` builds any program of the repository, such as `Server/MCPAuthServer.dpr` or `Examples/WhoAmI/WhoAmIServer.dpr`; the output goes to `bin/<Platform>/<Config>`.
 
 Machine settings live in `build/env.ps1`. Copy `build/env.local.example.ps1` to `build/env.local.ps1` to override them:
 
 - `BDS_ROOT`, `BDS_COMMON`: the Delphi installation (default Delphi 13, `Studio\37.0`).
 - `LINUX_SDK_ROOT`: the Linux64 SDK imported in the IDE (default `ubuntu26.04.sdk`).
 - `WSL_DISTRO`: the WSL distribution that runs the Linux64 tests (default `Ubuntu`).
-- `OPENSSL_DIR`: folder with `libcrypto-3-x64.dll` and `libssl-3-x64.dll`.
-- `PG_BIN_DIR`: folder with `libpq.dll` for the Win64 PostgreSQL store tests.
+- `OPENSSL_DIR`: folder with `libcrypto-3-x64.dll` and `libssl-3-x64.dll` for Win64.
+- `OPENSSL_DIR_WIN32`: folder with the 32-bit `libcrypto-3.dll` and `libssl-3.dll` for Win32.
+- `PG_BIN_DIR`: folder with `libpq.dll` for the PostgreSQL store tests on Windows; on Win32 it must hold a 32-bit `libpq.dll`.
 
 The Linux64 tests run inside WSL.
 
@@ -322,10 +325,10 @@ The auth server with the memory store and the WhoAmI example run together on one
 
 ## Operating system dependencies
 
-| Library | Used by | Win64 | Linux64 |
-|---------|---------|-------|---------|
-| OpenSSL 3 (`libcrypto`, `libssl`) | Tokens, hashing, AES-GCM and the certificate credential, through TaurusTLS | `libcrypto-3-x64.dll` and `libssl-3-x64.dll` next to the executable or on the `PATH`. After a Win64 build, `build/build.ps1` copies them from `OPENSSL_DIR`, `C:\Program Files\OpenSSL-Win64\bin`, or the `mingw64\bin` or `ucrt64\bin` folder of Git for Windows. | `libcrypto.so.3` and `libssl.so.3` (package `libssl3`, installed by default on Ubuntu). |
-| libpq | The PostgreSQL store (FireDAC PG driver) | `libpq.dll` and the DLLs it depends on, on the `PATH`: the `bin` folder of a PostgreSQL installation or of the official Windows binaries zip. | `libpq.so.5` (`sudo apt-get install -y libpq5`). |
+| Library | Used by | Win32 and Win64 | Linux64 |
+|---------|---------|-----------------|---------|
+| OpenSSL 3 (`libcrypto`, `libssl`) | Tokens, hashing, AES-GCM and the certificate credential, through TaurusTLS | Win64: `libcrypto-3-x64.dll` and `libssl-3-x64.dll`; Win32: `libcrypto-3.dll` and `libssl-3.dll`; next to the executable or on the `PATH`. After a Win64 build, `build/build.ps1` copies them from `OPENSSL_DIR`, `C:\Program Files\OpenSSL-Win64\bin`, or the `mingw64\bin` or `ucrt64\bin` folder of Git for Windows; after a Win32 build from `OPENSSL_DIR_WIN32`, an `OpenSSL-Win32\bin` folder under `Program Files (x86)` or `Program Files`, or the `mingw32\bin` folder of Git for Windows. | `libcrypto.so.3` and `libssl.so.3` (package `libssl3`, installed by default on Ubuntu). |
+| libpq | The PostgreSQL store (FireDAC PG driver) | `libpq.dll` and the DLLs it depends on, on the `PATH`: the `bin` folder of a PostgreSQL installation or of the official Windows binaries zip. Win32 needs a 32-bit `libpq.dll`. | `libpq.so.5` (`sudo apt-get install -y libpq5`). |
 | libcurl | `THTTPClient`: upstream token requests and the client side of MCP servers | Nothing to install; Windows uses WinHTTP. | `libcurl.so.4` (`sudo apt-get install -y libcurl4`). |
 
 ## License
