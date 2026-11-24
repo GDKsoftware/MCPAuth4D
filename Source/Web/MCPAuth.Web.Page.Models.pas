@@ -70,20 +70,25 @@ type
   TAccountPageModel = class(TPageModel)
   private
     FUserDisplayName: string;
+    FSignInUserName: string;
     FAccounts: TArray<TAccountRow>;
     FGrants: TArray<TGrantRow>;
     FProviders: TArray<string>;
 
     function GetAccountCountText: string;
     function GetHasGrants: Boolean;
+    function GetHasSignInAccount: Boolean;
 
   public
     property UserDisplayName: string read FUserDisplayName write FUserDisplayName;
+    // The user name of the login identity: the account the user signs in with.
+    property SignInUserName: string read FSignInUserName write FSignInUserName;
     property Accounts: TArray<TAccountRow> read FAccounts write FAccounts;
     property Grants: TArray<TGrantRow> read FGrants write FGrants;
     property Providers: TArray<string> read FProviders write FProviders;
     property AccountCountText: string read GetAccountCountText;
     property HasGrants: Boolean read GetHasGrants;
+    property HasSignInAccount: Boolean read GetHasSignInAccount;
   end;
 
   TLoginPageModel = class(TPageModel)
@@ -141,6 +146,11 @@ end;
 function TAccountPageModel.GetHasGrants: Boolean;
 begin
   Result := (Length(FGrants) > 0);
+end;
+
+function TAccountPageModel.GetHasSignInAccount: Boolean;
+begin
+  Result := not FSignInUserName.IsEmpty;
 end;
 
 end.

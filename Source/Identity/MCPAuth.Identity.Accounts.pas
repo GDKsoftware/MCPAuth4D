@@ -17,6 +17,7 @@ type
   TLinkedAccounts = class(TInterfacedObject, ILinkedAccounts)
   private
     FUsers: IUserRepository;
+    FIdentities: ILoginIdentityRepository;
     FAccounts: ILinkedAccountRepository;
     FProtector: ISecretProtector;
     FPolicy: IAccessPolicy;
@@ -29,16 +30,16 @@ type
 
     class function NewUserId: string; static;
     class function RefreshTokenContext(const UserId: string; const Key: TAccountKey): string; static;
-    class function AccountLockName(const Key: TAccountKey): string; static;
-    class function UserLockName(const UserId: string): string; static;
+    class function IdentityLockName(const Key: TAccountKey): string; static;
 
     function ResolveOrCreateUserLocked(const Tokens: TUpstreamTokens): TAuthUser;
-    function LinkLocked(const UserId: string; const Tokens: TUpstreamTokens): TLinkedAccount;
-    procedure UnlinkLocked(const UserId: string; const Key: TAccountKey);
+    function SignInKnownIdentity(const Existing: TLoginIdentity; const Identity: TUpstreamIdentity): TAuthUser;
+    function CreateUserWithIdentity(const Identity: TUpstreamIdentity): TAuthUser;
     procedure GuardAllowed(const Identity: TUpstreamIdentity);
     function GetUser(const UserId: string): TAuthUser;
     function CreateUser(const Identity: TUpstreamIdentity): TAuthUser;
     function SaveAccount(const UserId: string; const Tokens: TUpstreamTokens): TLinkedAccount;
+    function StoreAccount(const UserId: string; const Tokens: TUpstreamTokens): TLinkedAccount;
 
     function LockFor(const Context: string): TCriticalSection;
     function FindOwnAccount(const UserId: string; const Key: TAccountKey): TLinkedAccount;
@@ -53,7 +54,7 @@ type
     procedure StoreRefreshedAccount(const Account: TLinkedAccount; const Context, CurrentRefreshToken: string; const Tokens: TUpstreamTokens);
 
   public
-    constructor Create(const Users: IUserRepository; const Accounts: ILinkedAccountRepository; const Protector: ISecretProtector; const Policy: IAccessPolicy; const Providers: IUpstreamProviders; const Clock: IClock);
+    constructor Create(const Users: IUserRepository; const Identities: ILoginIdentityRepository; const Accounts: ILinkedAccountRepository; const Protector: ISecretProtector; const Policy: IAccessPolicy; const Providers: IUpstreamProviders; const Clock: IClock);
     destructor Destroy; override;
 
     function ResolveOrCreateUser(const Tokens: TUpstreamTokens): TAuthUser;
@@ -77,8 +78,7 @@ const
   ReasonRevoked = 'revoked';
   ReasonMissingScopes = 'missing_scopes';
   AlwaysGrantedScopes: array[0..3] of string = ('openid', 'profile', 'offline_access', 'email');
-  AccountLockFormat = 'account|%s';
-  UserLockFormat = 'user|%s';
+  IdentityLockFormat = 'identity|%s';
 
 { TLinkedAccounts }
 
@@ -95,21 +95,17 @@ begin
   Result := Format('%s|%s', [UserId, Key.Value]);
 end;
 
-class function TLinkedAccounts.AccountLockName(const Key: TAccountKey): string;
+class function TLinkedAccounts.IdentityLockName(const Key: TAccountKey): string;
 begin
-  Result := Format(AccountLockFormat, [Key.Value]);
+  Result := Format(IdentityLockFormat, [Key.Value]);
 end;
 
-class function TLinkedAccounts.UserLockName(const UserId: string): string;
-begin
-  Result := Format(UserLockFormat, [UserId]);
-end;
-
-constructor TLinkedAccounts.Create(const Users: IUserRepository; const Accounts: ILinkedAccountRepository; const Protector: ISecretProtector; const Policy: IAccessPolicy; const Providers: IUpstreamProviders; const Clock: IClock);
+constructor TLinkedAccounts.Create(const Users: IUserRepository; const Identities: ILoginIdentityRepository; const Accounts: ILinkedAccountRepository; const Protector: ISecretProtector; const Policy: IAccessPolicy; const Providers: IUpstreamProviders; const Clock: IClock);
 begin
   inherited Create;
 
   FUsers := Users;
+  FIdentities := Identities;
   FAccounts := Accounts;
   FProtector := Protector;
   FPolicy := Policy;
@@ -135,53 +131,73 @@ begin
   GuardAllowed(Tokens.Identity);
 
   // Two first sign-ins of the same account at once would otherwise both create a user.
-  const AccountLock = LockFor(AccountLockName(Tokens.Identity.Key));
-  AccountLock.Enter;
+  const IdentityLock = LockFor(IdentityLockName(Tokens.Identity.Key));
+  IdentityLock.Enter;
   try
     Result := ResolveOrCreateUserLocked(Tokens);
   finally
-    AccountLock.Leave;
-  end;
-end;
-
-function TLinkedAccounts.ResolveOrCreateUserLocked(const Tokens: TUpstreamTokens): TAuthUser;
-begin
-  var Existing: TLinkedAccount;
-  const IsKnownAccount = FAccounts.TryFind(Tokens.Identity.Key, Existing);
-  if IsKnownAccount then
-  begin
-    Result := GetUser(Existing.UserId);
-  end
-  else
-  begin
-    Result := CreateUser(Tokens.Identity);
+    IdentityLock.Leave;
   end;
 
   SaveAccount(Result.Id, Tokens);
 end;
 
-function TLinkedAccounts.Link(const UserId: string; const Tokens: TUpstreamTokens): TLinkedAccount;
+function TLinkedAccounts.ResolveOrCreateUserLocked(const Tokens: TUpstreamTokens): TAuthUser;
 begin
-  GuardAllowed(Tokens.Identity);
+  var Existing: TLoginIdentity;
+  if FIdentities.TryFind(Tokens.Identity.Key, Existing) then
+    Exit(SignInKnownIdentity(Existing, Tokens.Identity));
 
-  const AccountLock = LockFor(AccountLockName(Tokens.Identity.Key));
-  AccountLock.Enter;
   try
-    Result := LinkLocked(UserId, Tokens);
-  finally
-    AccountLock.Leave;
+    Result := CreateUserWithIdentity(Tokens.Identity);
+  except
+    // Another process created the identity between the lookup and the save.
+    on ELoginIdentityTaken do
+    begin
+      if not FIdentities.TryFind(Tokens.Identity.Key, Existing) then
+        raise;
+
+      Result := SignInKnownIdentity(Existing, Tokens.Identity);
+    end;
   end;
 end;
 
-function TLinkedAccounts.LinkLocked(const UserId: string; const Tokens: TUpstreamTokens): TLinkedAccount;
+function TLinkedAccounts.SignInKnownIdentity(const Existing: TLoginIdentity; const Identity: TUpstreamIdentity): TAuthUser;
 begin
-  GetUser(UserId);
+  Result := GetUser(Existing.UserId);
 
-  var Existing: TLinkedAccount;
-  const IsKnownAccount = FAccounts.TryFind(Tokens.Identity.Key, Existing);
-  const IsOtherUsersAccount = (IsKnownAccount and (Existing.UserId <> UserId));
-  if IsOtherUsersAccount then
-    raise EAccountLinkedToOtherUser.Create('The account is already linked to another user');
+  var Updated := Existing;
+  Updated.UserName       := Identity.UserName;
+  Updated.LastLoginAtUtc := FClock.NowUtc;
+  FIdentities.Save(Updated);
+end;
+
+function TLinkedAccounts.CreateUserWithIdentity(const Identity: TUpstreamIdentity): TAuthUser;
+begin
+  Result := CreateUser(Identity);
+
+  var LoginIdentity := Default(TLoginIdentity);
+  LoginIdentity.Key            := Identity.Key;
+  LoginIdentity.UserId         := Result.Id;
+  LoginIdentity.UserName       := Identity.UserName;
+  LoginIdentity.CreatedAtUtc   := Result.CreatedAtUtc;
+  LoginIdentity.LastLoginAtUtc := Result.CreatedAtUtc;
+  try
+    FIdentities.Save(LoginIdentity);
+  except
+    // Another process created the identity first; the user made for it here would stay behind without one.
+    on ELoginIdentityTaken do
+    begin
+      FUsers.Delete(Result.Id);
+      raise;
+    end;
+  end;
+end;
+
+function TLinkedAccounts.Link(const UserId: string; const Tokens: TUpstreamTokens): TLinkedAccount;
+begin
+  GuardAllowed(Tokens.Identity);
+  GetUser(UserId);
 
   Result := SaveAccount(UserId, Tokens);
 end;
@@ -219,28 +235,12 @@ end;
 
 procedure TLinkedAccounts.Unlink(const UserId: string; const Key: TAccountKey);
 begin
-  // The last-account check counts all accounts of the user, so concurrent unlinks of one user run one at a time.
-  const UserLock = LockFor(UserLockName(UserId));
-  UserLock.Enter;
-  try
-    UnlinkLocked(UserId, Key);
-  finally
-    UserLock.Leave;
-  end;
-end;
-
-procedure TLinkedAccounts.UnlinkLocked(const UserId: string; const Key: TAccountKey);
-begin
   const Context = RefreshTokenContext(UserId, Key);
 
   const AccountLock = LockFor(Context);
   AccountLock.Enter;
   try
     FindOwnAccount(UserId, Key);
-
-    const IsLastAccount = (FAccounts.ListForUser(UserId).Count <= 1);
-    if IsLastAccount then
-      raise ELastAccountCannotBeUnlinked.Create('The last linked account of a user cannot be unlinked');
 
     FAccounts.Delete(UserId, Key);
     RemoveCachedToken(Context);
@@ -273,10 +273,22 @@ end;
 
 function TLinkedAccounts.SaveAccount(const UserId: string; const Tokens: TUpstreamTokens): TLinkedAccount;
 begin
+  // The same lock as refresh and unlink of this account of this user.
+  const AccountLock = LockFor(RefreshTokenContext(UserId, Tokens.Identity.Key));
+  AccountLock.Enter;
+  try
+    Result := StoreAccount(UserId, Tokens);
+  finally
+    AccountLock.Leave;
+  end;
+end;
+
+function TLinkedAccounts.StoreAccount(const UserId: string; const Tokens: TUpstreamTokens): TLinkedAccount;
+begin
   const NowUtc = FClock.NowUtc;
   const Key = Tokens.Identity.Key;
 
-  const IsKnownAccount = FAccounts.TryFind(Key, Result);
+  const IsKnownAccount = FAccounts.TryFind(UserId, Key, Result);
   if not IsKnownAccount then
   begin
     Result := Default(TLinkedAccount);
@@ -323,8 +335,7 @@ end;
 
 function TLinkedAccounts.FindOwnAccount(const UserId: string; const Key: TAccountKey): TLinkedAccount;
 begin
-  const IsOwnAccount = (FAccounts.TryFind(Key, Result) and (Result.UserId = UserId));
-  if not IsOwnAccount then
+  if not FAccounts.TryFind(UserId, Key, Result) then
     raise ELinkedAccountNotFound.Create('The linked account does not exist');
 end;
 

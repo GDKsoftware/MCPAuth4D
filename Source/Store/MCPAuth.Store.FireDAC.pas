@@ -19,6 +19,7 @@ implementation
 uses
   MCPAuth.Store.FireDAC.Dialect,
   MCPAuth.Store.FireDAC.Users,
+  MCPAuth.Store.FireDAC.LoginIdentities,
   MCPAuth.Store.FireDAC.LinkedAccounts,
   MCPAuth.Store.FireDAC.Clients,
   MCPAuth.Store.FireDAC.PendingAuthorizations,
@@ -33,6 +34,7 @@ begin
   const Dialect = TSqlDialect.Postgres;
 
   Result.Users := TFireDACUserRepository.Create(Factory, Dialect);
+  Result.LoginIdentities := TFireDACLoginIdentityRepository.Create(Factory);
   Result.LinkedAccounts := TFireDACLinkedAccountRepository.Create(Factory);
   Result.Clients := TFireDACClientRepository.Create(Factory, Dialect);
   Result.Pending := TFireDACPendingAuthorizationStore.Create(Factory, Dialect, Clock);

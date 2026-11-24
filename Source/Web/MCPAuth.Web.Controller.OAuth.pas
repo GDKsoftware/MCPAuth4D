@@ -105,7 +105,6 @@ const
   StatusBadRequest = 400;
   StatusForbidden = 403;
   StatusNotFound = 404;
-  StatusConflict = 409;
   StatusInternalServerError = 500;
   StatusBadGateway = 502;
 
@@ -134,7 +133,6 @@ const
   UpstreamCancelledMessage = 'The sign-in was cancelled or failed.';
   UpstreamFailedMessage = 'The sign-in with the identity provider failed. Please try again.';
   AccessDeniedMessage = 'Your account has no access to this service.';
-  LinkedToOtherUserMessage = 'This account is already linked to another user.';
 
 { TOAuthController }
 
@@ -384,8 +382,6 @@ begin
       Result := CallbackErrorPage(E);
     on EAccessDenied do
       Result := ErrorPage(StatusForbidden, AccessDeniedMessage);
-    on EAccountLinkedToOtherUser do
-      Result := ErrorPage(StatusConflict, LinkedToOtherUserMessage);
     on EUpstreamError do
       Result := ErrorPage(StatusBadGateway, UpstreamFailedMessage);
   end;

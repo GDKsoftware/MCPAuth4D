@@ -14,11 +14,13 @@ type
     FLock: TCriticalSection;
     FAccounts: IDictionary<string, TLinkedAccount>;
 
+    class function RowKey(const UserId: string; const Key: TAccountKey): string; static;
+
   public
     constructor Create;
     destructor Destroy; override;
 
-    function TryFind(const Key: TAccountKey; out Account: TLinkedAccount): Boolean;
+    function TryFind(const UserId: string; const Key: TAccountKey; out Account: TLinkedAccount): Boolean;
     function ListForUser(const UserId: string): IReadOnlyList<TLinkedAccount>;
 
     procedure Save(const Account: TLinkedAccount);
@@ -28,10 +30,14 @@ type
 implementation
 
 uses
-  System.SysUtils,
-  MCPAuth.Identity.Exceptions;
+  System.SysUtils;
 
 { TMemoryLinkedAccountRepository }
+
+class function TMemoryLinkedAccountRepository.RowKey(const UserId: string; const Key: TAccountKey): string;
+begin
+  Result := Format('%s|%s', [UserId, Key.Value]);
+end;
 
 constructor TMemoryLinkedAccountRepository.Create;
 begin
@@ -46,11 +52,11 @@ begin
   inherited Destroy;
 end;
 
-function TMemoryLinkedAccountRepository.TryFind(const Key: TAccountKey; out Account: TLinkedAccount): Boolean;
+function TMemoryLinkedAccountRepository.TryFind(const UserId: string; const Key: TAccountKey; out Account: TLinkedAccount): Boolean;
 begin
   FLock.Enter;
   try
-    Result := FAccounts.TryGetValue(Key.Value, Account);
+    Result := FAccounts.TryGetValue(RowKey(UserId, Key), Account);
   finally
     FLock.Leave;
   end;
@@ -79,15 +85,7 @@ procedure TMemoryLinkedAccountRepository.Save(const Account: TLinkedAccount);
 begin
   FLock.Enter;
   try
-    var Existing: TLinkedAccount;
-    const IsKnown = FAccounts.TryGetValue(Account.Key.Value, Existing);
-    const IsLinkedToOtherUser = (IsKnown and (Existing.UserId <> Account.UserId));
-    if IsLinkedToOtherUser then
-    begin
-      raise EAccountLinkedToOtherUser.Create('The account is already linked to another user');
-    end;
-
-    FAccounts[Account.Key.Value] := Account;
+    FAccounts[RowKey(Account.UserId, Account.Key)] := Account;
   finally
     FLock.Leave;
   end;
@@ -97,13 +95,7 @@ procedure TMemoryLinkedAccountRepository.Delete(const UserId: string; const Key:
 begin
   FLock.Enter;
   try
-    var Existing: TLinkedAccount;
-    const IsKnown = FAccounts.TryGetValue(Key.Value, Existing);
-    const IsOwnAccount = (IsKnown and (Existing.UserId = UserId));
-    if IsOwnAccount then
-    begin
-      FAccounts.Remove(Key.Value);
-    end;
+    FAccounts.Remove(RowKey(UserId, Key));
   finally
     FLock.Leave;
   end;

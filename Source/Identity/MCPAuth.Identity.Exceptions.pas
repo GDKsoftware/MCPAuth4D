@@ -6,11 +6,10 @@ uses
   System.SysUtils;
 
 type
-  EAccountLinkedToOtherUser = class(Exception);
   EAccessDenied = class(Exception);
   EUserNotFound = class(Exception);
   ELinkedAccountNotFound = class(Exception);
-  ELastAccountCannotBeUnlinked = class(Exception);
+  ELoginIdentityTaken = class(Exception);
 
   ELinkedAccountNeedsReconnect = class(Exception)
   private

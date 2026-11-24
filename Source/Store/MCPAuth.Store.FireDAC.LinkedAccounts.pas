@@ -10,22 +10,18 @@ uses
   MCPAuth.Store.FireDAC.Command;
 
 type
-  // The unique index on account_key keeps one owner per upstream account, also when two saves race.
+  // The unique index on (user_id, account_key) keeps one row per user and upstream account, also when two saves race.
   TFireDACLinkedAccountRepository = class(TInterfacedObject, ILinkedAccountRepository)
   private
     FFactory: IFireDACConnectionFactory;
 
-    function TryFindOwner(const Key: TAccountKey; out UserId: string): Boolean;
-    procedure GuardOwner(const Account: TLinkedAccount; const OwnerId: string);
-    procedure Insert(const Account: TLinkedAccount);
-    procedure Update(const Account: TLinkedAccount);
     procedure SetAccountParams(const Command: TFireDACCommand; const Account: TLinkedAccount);
     function ReadAccount(const Command: TFireDACCommand): TLinkedAccount;
 
   public
     constructor Create(const Factory: IFireDACConnectionFactory);
 
-    function TryFind(const Key: TAccountKey; out Account: TLinkedAccount): Boolean;
+    function TryFind(const UserId: string; const Key: TAccountKey; out Account: TLinkedAccount): Boolean;
     function ListForUser(const UserId: string): IReadOnlyList<TLinkedAccount>;
 
     procedure Save(const Account: TLinkedAccount);
@@ -35,23 +31,21 @@ type
 implementation
 
 uses
-  System.SysUtils,
-  MCPAuth.Identity.Exceptions;
+  System.SysUtils;
 
 const
   SelectColumns = 'SELECT provider, tenant_id, object_id, user_id, display_name, user_name, granted_scopes, ' +
                   'protected_refresh_token, needs_reconnect, linked_at, updated_at FROM mcpauth_linked_accounts ';
-  SelectByKey = SelectColumns + 'WHERE account_key = :account_key';
+  SelectByKey = SelectColumns + 'WHERE user_id = :user_id AND account_key = :account_key';
   SelectByUser = SelectColumns + 'WHERE user_id = :user_id ORDER BY linked_at, account_key';
-  SelectOwner = 'SELECT user_id FROM mcpauth_linked_accounts WHERE account_key = :account_key';
-  InsertAccount = 'INSERT INTO mcpauth_linked_accounts (account_key, provider, tenant_id, object_id, user_id, display_name, ' +
+  UpsertAccount = 'INSERT INTO mcpauth_linked_accounts (account_key, provider, tenant_id, object_id, user_id, display_name, ' +
                   'user_name, granted_scopes, protected_refresh_token, needs_reconnect, linked_at, updated_at) VALUES ' +
                   '(:account_key, :provider, :tenant_id, :object_id, :user_id, :display_name, :user_name, :granted_scopes, ' +
-                  ':protected_refresh_token, :needs_reconnect, :linked_at, :updated_at)';
-  UpdateAccount = 'UPDATE mcpauth_linked_accounts SET provider = :provider, tenant_id = :tenant_id, object_id = :object_id, ' +
-                  'display_name = :display_name, user_name = :user_name, granted_scopes = :granted_scopes, ' +
-                  'protected_refresh_token = :protected_refresh_token, needs_reconnect = :needs_reconnect, ' +
-                  'linked_at = :linked_at, updated_at = :updated_at WHERE account_key = :account_key AND user_id = :user_id';
+                  ':protected_refresh_token, :needs_reconnect, :linked_at, :updated_at) ON CONFLICT (user_id, account_key) ' +
+                  'DO UPDATE SET provider = EXCLUDED.provider, tenant_id = EXCLUDED.tenant_id, object_id = EXCLUDED.object_id, ' +
+                  'display_name = EXCLUDED.display_name, user_name = EXCLUDED.user_name, granted_scopes = EXCLUDED.granted_scopes, ' +
+                  'protected_refresh_token = EXCLUDED.protected_refresh_token, needs_reconnect = EXCLUDED.needs_reconnect, ' +
+                  'linked_at = EXCLUDED.linked_at, updated_at = EXCLUDED.updated_at';
   DeleteAccount = 'DELETE FROM mcpauth_linked_accounts WHERE account_key = :account_key AND user_id = :user_id';
 
 { TFireDACLinkedAccountRepository }
@@ -62,12 +56,13 @@ begin
   FFactory := Factory;
 end;
 
-function TFireDACLinkedAccountRepository.TryFind(const Key: TAccountKey; out Account: TLinkedAccount): Boolean;
+function TFireDACLinkedAccountRepository.TryFind(const UserId: string; const Key: TAccountKey; out Account: TLinkedAccount): Boolean;
 begin
   Account := Default(TLinkedAccount);
 
   const Command = TFireDACCommand.Create(FFactory, SelectByKey);
   try
+    Command.SetText('user_id', UserId);
     Command.SetText('account_key', Key.Value);
     Command.Open;
 
@@ -104,29 +99,12 @@ end;
 
 procedure TFireDACLinkedAccountRepository.Save(const Account: TLinkedAccount);
 begin
-  var OwnerId: string;
-  if TryFindOwner(Account.Key, OwnerId) then
-  begin
-    GuardOwner(Account, OwnerId);
-    Update(Account);
-    Exit;
-  end;
-
+  const Command = TFireDACCommand.Create(FFactory, UpsertAccount);
   try
-    Insert(Account);
-  except
-    on Error: Exception do
-    begin
-      // Another save inserted the same account between the check and the insert.
-      const IsRace = (TFireDACCommand.IsUniqueViolation(Error) and TryFindOwner(Account.Key, OwnerId));
-      if not IsRace then
-      begin
-        raise;
-      end;
-
-      GuardOwner(Account, OwnerId);
-      Update(Account);
-    end;
+    SetAccountParams(Command, Account);
+    Command.Execute;
+  finally
+    Command.Free;
   end;
 end;
 
@@ -136,56 +114,6 @@ begin
   try
     Command.SetText('account_key', Key.Value);
     Command.SetText('user_id', UserId);
-    Command.Execute;
-  finally
-    Command.Free;
-  end;
-end;
-
-function TFireDACLinkedAccountRepository.TryFindOwner(const Key: TAccountKey; out UserId: string): Boolean;
-begin
-  UserId := '';
-
-  const Command = TFireDACCommand.Create(FFactory, SelectOwner);
-  try
-    Command.SetText('account_key', Key.Value);
-    Command.Open;
-
-    Result := not Command.Eof;
-    if Result then
-    begin
-      UserId := Command.Text('user_id');
-    end;
-  finally
-    Command.Free;
-  end;
-end;
-
-procedure TFireDACLinkedAccountRepository.GuardOwner(const Account: TLinkedAccount; const OwnerId: string);
-begin
-  const IsLinkedToOtherUser = (OwnerId <> Account.UserId);
-  if IsLinkedToOtherUser then
-  begin
-    raise EAccountLinkedToOtherUser.Create('The account is already linked to another user');
-  end;
-end;
-
-procedure TFireDACLinkedAccountRepository.Insert(const Account: TLinkedAccount);
-begin
-  const Command = TFireDACCommand.Create(FFactory, InsertAccount);
-  try
-    SetAccountParams(Command, Account);
-    Command.Execute;
-  finally
-    Command.Free;
-  end;
-end;
-
-procedure TFireDACLinkedAccountRepository.Update(const Account: TLinkedAccount);
-begin
-  const Command = TFireDACCommand.Create(FFactory, UpdateAccount);
-  try
-    SetAccountParams(Command, Account);
     Command.Execute;
   finally
     Command.Free;

@@ -21,6 +21,11 @@ type
     procedure RecreateSchema;
     procedure ClearTables;
     procedure AssertStoredAsUtc(const Factory: IFireDACConnectionFactory);
+    procedure DropSchema;
+    procedure CopyMigrations(const TargetPath: string; const UpToVersion: Integer);
+    procedure InsertUserWithAccount(const UserId, ObjectId, LinkedAt: string);
+    procedure InsertAccount(const UserId, ObjectId, LinkedAt: string);
+    function IdentityKeyOf(const UserId: string): string;
 
   protected
     function CreateStore(const Clock: IClock): TStoreSet; override;
@@ -38,27 +43,46 @@ type
 
     [Test]
     procedure TimesStayUtcInAnotherSessionTimeZone;
+
+    [Test]
+    procedure AddMissingGivesUsersWithoutIdentityTheirOldestAccount;
+
+    [Test]
+    procedure AddMissingSkipsAccountLinkedByOtherUser;
+
+    [Test]
+    procedure AddMissingIgnoresLinksWithoutUser;
+
+    [Test]
+    procedure Migration0004GivesExistingUsersTheirOldestAccount;
   end;
 
 implementation
 
 uses
   System.SysUtils,
+  System.IOUtils,
   System.DateUtils,
   MCPAuth.Fakes.Clock,
   MCPAuth.OAuth.Types,
   MCPAuth.Store.FireDAC,
   MCPAuth.Store.FireDAC.ConnectionFactory,
+  MCPAuth.Store.FireDAC.LoginIdentities,
   MCPAuth.Store.FireDAC.Migrations,
   MCPAuth.Tests.Postgres;
 
 const
-  StoreTables: array[0..7] of string = ('mcpauth_users', 'mcpauth_linked_accounts', 'mcpauth_clients', 'mcpauth_pending_authorizations',
+  // Child tables first: mcpauth_login_identities refers to mcpauth_users.
+  StoreTables: array[0..8] of string = ('mcpauth_login_identities', 'mcpauth_users', 'mcpauth_linked_accounts', 'mcpauth_clients', 'mcpauth_pending_authorizations',
                                         'mcpauth_grants', 'mcpauth_tokens', 'mcpauth_sessions', 'mcpauth_revoked_families');
   VersionTable = 'mcpauth_schema_version';
   UtcTokenHash = 'utc-token';
   // 2026-06-01 12:00:00 UTC
   UtcExpiryUnix = 1780315200;
+  InsertTestUser = 'INSERT INTO mcpauth_users (id, display_name, created_at) VALUES (''%0:s'', ''%0:s'', ''%1:s'') ON CONFLICT (id) DO NOTHING';
+  InsertTestAccount = 'INSERT INTO mcpauth_linked_accounts (account_key, provider, tenant_id, object_id, user_id, display_name, user_name, ' +
+                      'granted_scopes, protected_refresh_token, needs_reconnect, linked_at, updated_at) VALUES (''microsoft:tenant-1:%0:s'', ' +
+                      '''microsoft'', ''tenant-1'', ''%0:s'', ''%1:s'', ''%0:s'', ''%0:s@example.test'', ''openid'', ''\x00'', false, ''%2:s'', ''%2:s'')';
 
 { TFireDACStoreContractTests }
 
@@ -99,12 +123,17 @@ end;
 
 procedure TFireDACStoreContractTests.RecreateSchema;
 begin
+  DropSchema;
+  TFireDACMigrations.Apply(FFactory, 'postgres', TTestPostgres.MigrationsPath);
+end;
+
+procedure TFireDACStoreContractTests.DropSchema;
+begin
   for var Table in StoreTables do
   begin
     TTestPostgres.Execute(FFactory, Format('DROP TABLE IF EXISTS %s', [Table]));
   end;
   TTestPostgres.Execute(FFactory, Format('DROP TABLE IF EXISTS %s', [VersionTable]));
-  TFireDACMigrations.Apply(FFactory, 'postgres', TTestPostgres.MigrationsPath);
 end;
 
 procedure TFireDACStoreContractTests.ClearTables;
@@ -156,6 +185,128 @@ begin
   Assert.IsTrue(IsFound);
   Assert.AreEqual<TDateTime>(ExpiresAtUtc, Read.ExpiresAtUtc);
   Assert.AreEqual<Int64>(UtcExpiryUnix, StoredUnix);
+end;
+
+procedure TFireDACStoreContractTests.AddMissingGivesUsersWithoutIdentityTheirOldestAccount;
+begin
+  RequireStore;
+
+  ClearTables;
+  InsertUserWithAccount('u1', 'object-newer', '2026-06-02 10:00:00+00');
+  InsertUserWithAccount('u1', 'object-older', '2026-06-01 10:00:00+00');
+  const Identities = TFireDACLoginIdentityRepository.Create(FFactory);
+  try
+    const FirstRun = Identities.AddMissing;
+    const SecondRun = Identities.AddMissing;
+
+    Assert.AreEqual(1, FirstRun);
+    Assert.AreEqual(0, SecondRun);
+    Assert.AreEqual('microsoft:tenant-1:object-older', IdentityKeyOf('u1'));
+  finally
+    Identities.Free;
+  end;
+end;
+
+procedure TFireDACStoreContractTests.AddMissingSkipsAccountLinkedByOtherUser;
+begin
+  RequireStore;
+
+  ClearTables;
+  InsertUserWithAccount('u1', 'object-shared', '2026-06-01 10:00:00+00');
+  InsertUserWithAccount('u2', 'object-shared', '2026-06-02 10:00:00+00');
+  const Identities = TFireDACLoginIdentityRepository.Create(FFactory);
+  try
+    const Added = Identities.AddMissing;
+
+    Assert.AreEqual(0, Added);
+    Assert.AreEqual<Int64>(0, TTestPostgres.QueryInt(FFactory, 'SELECT COUNT(*) FROM mcpauth_login_identities'));
+  finally
+    Identities.Free;
+  end;
+end;
+
+procedure TFireDACStoreContractTests.AddMissingIgnoresLinksWithoutUser;
+begin
+  RequireStore;
+
+  ClearTables;
+  InsertAccount('ghost', 'object-ghost', '2026-06-01 10:00:00+00');
+  const Identities = TFireDACLoginIdentityRepository.Create(FFactory);
+  try
+    const Added = Identities.AddMissing;
+
+    Assert.AreEqual(0, Added);
+  finally
+    Identities.Free;
+  end;
+end;
+
+procedure TFireDACStoreContractTests.Migration0004GivesExistingUsersTheirOldestAccount;
+begin
+  RequireStore;
+
+  const MigrationsPath = TPath.Combine(TPath.GetTempPath, 'mcpauth-0004-' + TGUID.NewGuid.ToString);
+  try
+    DropSchema;
+    CopyMigrations(MigrationsPath, 3);
+    TFireDACMigrations.Apply(FFactory, 'postgres', MigrationsPath);
+    InsertUserWithAccount('u1', 'object-a', '2026-06-01 10:00:00+00');
+    InsertUserWithAccount('u2', 'object-c', '2026-06-03 10:00:00+00');
+    InsertUserWithAccount('u2', 'object-b', '2026-06-02 10:00:00+00');
+    InsertAccount('ghost', 'object-ghost', '2026-06-01 09:00:00+00');
+
+    CopyMigrations(MigrationsPath, 4);
+    TFireDACMigrations.Apply(FFactory, 'postgres', MigrationsPath);
+
+    Assert.AreEqual<Int64>(2, TTestPostgres.QueryInt(FFactory, 'SELECT COUNT(*) FROM mcpauth_login_identities'));
+    Assert.AreEqual('microsoft:tenant-1:object-a', IdentityKeyOf('u1'));
+    Assert.AreEqual('microsoft:tenant-1:object-b', IdentityKeyOf('u2'));
+    Assert.AreEqual<Int64>(4, TTestPostgres.QueryInt(FFactory, 'SELECT COUNT(*) FROM mcpauth_linked_accounts'));
+
+    InsertUserWithAccount('u2', 'object-a', '2026-06-04 10:00:00+00');
+    Assert.AreEqual<Int64>(2, TTestPostgres.QueryInt(FFactory, 'SELECT COUNT(*) FROM mcpauth_linked_accounts WHERE object_id = ''object-a'''));
+  finally
+    TDirectory.Delete(MigrationsPath, True);
+    RecreateSchema;
+  end;
+end;
+
+procedure TFireDACStoreContractTests.CopyMigrations(const TargetPath: string; const UpToVersion: Integer);
+begin
+  const SourceFolder = TPath.Combine(TTestPostgres.MigrationsPath, 'postgres');
+  const TargetFolder = TPath.Combine(TargetPath, 'postgres');
+  TDirectory.CreateDirectory(TargetFolder);
+  for var Source in TDirectory.GetFiles(SourceFolder, '*.sql') do
+  begin
+    const FileName = TPath.GetFileName(Source);
+    const Target = TPath.Combine(TargetFolder, FileName);
+    const IsWanted = ((StrToInt(FileName.Substring(0, 4)) <= UpToVersion) and not TFile.Exists(Target));
+    if IsWanted then
+    begin
+      TFile.Copy(Source, Target);
+    end;
+  end;
+end;
+
+procedure TFireDACStoreContractTests.InsertUserWithAccount(const UserId, ObjectId, LinkedAt: string);
+begin
+  TTestPostgres.Execute(FFactory, Format(InsertTestUser, [UserId, LinkedAt]));
+  InsertAccount(UserId, ObjectId, LinkedAt);
+end;
+
+procedure TFireDACStoreContractTests.InsertAccount(const UserId, ObjectId, LinkedAt: string);
+begin
+  TTestPostgres.Execute(FFactory, Format(InsertTestAccount, [ObjectId, UserId, LinkedAt]));
+end;
+
+function TFireDACStoreContractTests.IdentityKeyOf(const UserId: string): string;
+begin
+  const Connection = FFactory.NewConnection;
+  try
+    Result := Connection.ExecSQLScalar(Format('SELECT identity_key FROM mcpauth_login_identities WHERE user_id = ''%s''', [UserId]));
+  finally
+    Connection.Free;
+  end;
 end;
 
 end.

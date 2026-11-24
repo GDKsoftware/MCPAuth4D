@@ -16,6 +16,7 @@ implementation
 
 uses
   MCPAuth.Store.Memory.Users,
+  MCPAuth.Store.Memory.LoginIdentities,
   MCPAuth.Store.Memory.LinkedAccounts,
   MCPAuth.Store.Memory.Clients,
   MCPAuth.Store.Memory.PendingAuthorizations,
@@ -28,6 +29,7 @@ uses
 class function TMemoryStore.CreateSet(const Clock: IClock): TStoreSet;
 begin
   Result.Users := TMemoryUserRepository.Create;
+  Result.LoginIdentities := TMemoryLoginIdentityRepository.Create;
   Result.LinkedAccounts := TMemoryLinkedAccountRepository.Create;
   Result.Clients := TMemoryClientRepository.Create;
   Result.Pending := TMemoryPendingAuthorizationStore.Create(Clock);

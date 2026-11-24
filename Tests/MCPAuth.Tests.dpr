@@ -39,6 +39,7 @@ uses
   MCPAuth.Upstream.Microsoft.Tests in 'MCPAuth.Upstream.Microsoft.Tests.pas',
   MCPAuth.Fakes.UpstreamProvider in 'MCPAuth.Fakes.UpstreamProvider.pas',
   MCPAuth.Fakes.AccessPolicy in 'MCPAuth.Fakes.AccessPolicy.pas',
+  MCPAuth.Fakes.LoginIdentities in 'MCPAuth.Fakes.LoginIdentities.pas',
   MCPAuth.Upstream.Providers.Tests in 'MCPAuth.Upstream.Providers.Tests.pas',
   MCPAuth.Identity.Accounts.Tests in 'MCPAuth.Identity.Accounts.Tests.pas',
   MCPAuth.OAuth.Server.Tests in 'MCPAuth.OAuth.Server.Tests.pas',

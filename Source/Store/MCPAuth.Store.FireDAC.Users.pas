@@ -19,6 +19,7 @@ type
 
     function TryGet(const UserId: string; out User: TAuthUser): Boolean;
     procedure Save(const User: TAuthUser);
+    procedure Delete(const UserId: string);
   end;
 
 implementation
@@ -28,6 +29,7 @@ uses
 
 const
   SelectUser = 'SELECT id, display_name, created_at FROM mcpauth_users WHERE id = :id';
+  DeleteUser = 'DELETE FROM mcpauth_users WHERE id = :id';
 
 { TFireDACUserRepository }
 
@@ -67,6 +69,17 @@ begin
     Command.SetText('id', User.Id);
     Command.SetText('display_name', User.DisplayName);
     Command.SetUtc('created_at', User.CreatedAtUtc);
+    Command.Execute;
+  finally
+    Command.Free;
+  end;
+end;
+
+procedure TFireDACUserRepository.Delete(const UserId: string);
+begin
+  const Command = TFireDACCommand.Create(FFactory, DeleteUser);
+  try
+    Command.SetText('id', UserId);
     Command.Execute;
   finally
     Command.Free;

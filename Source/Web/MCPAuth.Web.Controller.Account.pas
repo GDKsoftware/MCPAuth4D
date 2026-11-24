@@ -57,6 +57,7 @@ type
     function ResourceNameOf(const ResourceUri: string): string;
     function ClientNameOf(const ClientId: string): string;
     function UserDisplayNameOf(const UserId: string): string;
+    function SignInUserNameOf(const UserId: string): string;
 
     function Link(const Request: TWebRequest; const Session: TWebSession): TWebResponse;
     function Reconnect(const Request: TWebRequest; const Session: TWebSession): TWebResponse;
@@ -98,7 +99,6 @@ const
   StatusBadRequest = 400;
   StatusForbidden = 403;
   StatusNotFound = 404;
-  StatusConflict = 409;
   StatusInternalServerError = 500;
   StatusServiceUnavailable = 503;
 
@@ -126,7 +126,6 @@ const
   NoSessionMessage = 'Your session has ended. Please sign in again.';
   CsrfMessage = 'The request could not be verified. Please go back to your account page and try again.';
   AccountNotFoundMessage = 'The account was not found.';
-  LastAccountMessage = 'The last linked account cannot be unlinked, because you could no longer sign in.';
   NoProviderMessage = 'No sign-in provider is configured.';
   LoggedOutMessage = 'You have been logged out.';
 
@@ -301,6 +300,7 @@ begin
     Result.Title           := AccountTitle;
     Result.Csrf            := Session.CsrfToken;
     Result.UserDisplayName := UserDisplayNameOf(Session.UserId);
+    Result.SignInUserName  := SignInUserNameOf(Session.UserId);
     Result.Providers       := FProviders.Names;
     BuildAccountRows(Result, Session.UserId);
     BuildGrantRows(Result, Session.UserId);
@@ -379,6 +379,15 @@ begin
     Result := '';
 end;
 
+function TAccountController.SignInUserNameOf(const UserId: string): string;
+begin
+  const Identities = FStores.LoginIdentities.ListForUser(UserId);
+  if Identities.IsEmpty then
+    Result := ''
+  else
+    Result := Identities.First.UserName;
+end;
+
 function TAccountController.Link(const Request: TWebRequest; const Session: TWebSession): TWebResponse;
 begin
   Result := StartLinking(Request.FormField(ProviderField), Session);
@@ -417,8 +426,6 @@ begin
     FAccounts.Unlink(Session.UserId, Account.Key);
     Result := WithNoStore(TWebResponse.Redirect(AccountPath));
   except
-    on ELastAccountCannotBeUnlinked do
-      Result := ErrorPage(StatusConflict, LastAccountMessage);
     on ELinkedAccountNotFound do
       Result := ErrorPage(StatusNotFound, AccountNotFoundMessage);
   end;
