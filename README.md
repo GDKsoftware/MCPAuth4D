@@ -47,8 +47,8 @@ MCPAuth4D lets several MCP servers share one OAuth 2.1 authorization server. Use
 
 - **Two listeners.** The public listener serves the OAuth endpoints and the account pages. The internal listener serves the endpoints for MCP servers and binds to `127.0.0.1` by default. The internal routes do not exist on the public listener (they answer 404 there), so a proxy mistake cannot expose them.
 - **Resource registry.** A JSON file lists every MCP server (resource) that may use the auth server: its canonical URI, its display name, its service id with the SHA-256 of its service secret, and the upstream scopes it needs. A token is issued for exactly one resource; introspection by another resource answers `active: false`.
-- **Users and identity.** The auth server keeps its own users. The first sign-in with an upstream account creates a user; a later sign-in with any account linked to that user signs in as that user, so every linked account is a way in and the user is as safe as the weakest of them. An account belongs to one user only: linking an account that another user already has fails. Linking happens on the account page, for the user of the signed-in session, and every MCP client token is issued for that same user, so an MCP server only ever sees the linked accounts of the user behind the token. The Microsoft provider signs in through the `organizations` endpoint: work or school accounts only, no personal Microsoft accounts.
-- **Linked accounts.** Every upstream account a user signs in with or links is stored with its refresh token, encrypted with AES-256-GCM. MCP servers ask for an upstream access token per account; the auth server refreshes it when needed. When the upstream consent was revoked, or a resource needs more scopes than the account granted, the answer is `reconnect_required` and the account page shows "Reconnect".
+- **Users and identity.** The auth server keeps its own users. Every user has one login identity: the upstream account whose first sign-in created the user. Signing in only works with a login identity; an account that is merely linked never signs anyone in, so signing in with it creates a new user of its own. An account is the login identity of at most one user. Linking happens on the account page, for the user of the signed-in session, and every MCP client token is issued for that same user, so an MCP server only ever sees the linked accounts of the user behind the token. The Microsoft provider signs in through the `organizations` endpoint: work or school accounts only, no personal Microsoft accounts.
+- **Linked accounts.** Every upstream account a user signs in with or links is stored with its refresh token, encrypted with AES-256-GCM. Several users can link the same account; each has a link and a refresh token of his own, and unlinking or reconnecting touches only that link. Consent is kept by the upstream provider per account, so when the account owner revokes it there, every link of that account needs a reconnect. MCP servers ask for an upstream access token per account; the auth server refreshes it when needed. When the upstream consent was revoked, or a resource needs more scopes than the account granted, the answer is `reconnect_required` and the account page shows "Reconnect".
 - **Sensitive values.** Tokens, codes, session ids and service secrets are stored only as SHA-256 hashes (base64url). Logs and error messages never carry a token, code, secret, key or e-mail address.
 - **Revocation delay.** An MCP server caches a positive introspection result for up to 60 seconds, so a revoked token can keep working at that MCP server for up to a minute.
 - **Security notes.** [docs/security.md](docs/security.md) describes the sign-in binding, cookies, refresh-token rotation, caches, upstream scopes, cleanup and the known limits.
@@ -204,7 +204,7 @@ The pages (`login`, `consent`, `account`, `error`, `done`) are [WebStencils](htt
 
 ## Stores and adding a database
 
-`TStoreSet` (`MCPAuth.Store.Interfaces`) bundles the repositories: users, linked accounts, clients, pending authorizations, grants, tokens and sessions. Two implementations exist:
+`TStoreSet` (`MCPAuth.Store.Interfaces`) bundles the repositories: users, login identities, linked accounts, clients, pending authorizations, grants, tokens and sessions. Two implementations exist:
 
 - `TMemoryStore.CreateSet(Clock)`: in memory, for tests and development.
 - `TFireDACStore.CreateSet(Factory, Clock)`: PostgreSQL through FireDAC.
@@ -218,6 +218,7 @@ const Stores = TFireDACStore.CreateSet(Factory, Clock);
 
 - `TFireDACConnectionFactory` registers a private, pooled FireDAC connection definition. Every repository call takes a connection from the pool and hands it back, so no connection is shared between threads.
 - `TFireDACMigrations.Apply` runs `<MigrationsPath>/<dialect>/NNNN_*.sql` in order, each file in its own transaction together with its row in the version table (default `mcpauth_schema_version`). Applied files are skipped, and the version table is locked per file, so servers that start together apply each file once. An MCP server can keep its own migrations with its own `VersionTable`.
+- Migration `0004` adds login identities and gives every existing user his oldest linked account as login identity. A release from before it must not run on the database once an account is linked by two users, so roll back only to a release that has it. `TFireDACLoginIdentityRepository.AddMissing` repeats that step for users an older release created while the migration ran; the server program calls it right after the migrations.
 - The schema uses the prefix `mcpauth_`, `timestamptz` for times and `bytea` for bytes. Times are written with an explicit UTC offset and read back as UTC, whatever the session or machine time zone.
 - Connections open with `ResourceOptions.SilentMode`, so console and service programs need no FireDAC wait-cursor unit.
 
@@ -241,7 +242,7 @@ A store that is not SQL implements the interfaces in `MCPAuth.Store.Interfaces`,
 | | `MCPAuth.Secret.AesGcm` | AES-256-GCM envelopes with key ids, for key rotation |
 | | `MCPAuth.Secret.OpenSsl` | Loads OpenSSL 3 through TaurusTLS |
 | Clock | `MCPAuth.Clock.Interfaces`, `MCPAuth.Clock` | `IClock` (UTC) and the system clock |
-| Identity | `MCPAuth.Identity.Types`, `.Interfaces`, `.Exceptions` | Users, linked accounts and `ILinkedAccounts` |
+| Identity | `MCPAuth.Identity.Types`, `.Interfaces`, `.Exceptions` | Users, login identities, linked accounts and `ILinkedAccounts` |
 | | `MCPAuth.Identity.Accounts` | Sign-in, linking, encrypted refresh tokens, upstream token refresh |
 | | `MCPAuth.Identity.Access.Interfaces`, `.Access.AllowAll` | `IAccessPolicy` and the allow-all policy |
 | Resource | `MCPAuth.Resource.Types`, `.Interfaces`, `.Exceptions` | Resource definitions and `IResourceRegistry` |
