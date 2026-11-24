@@ -120,6 +120,9 @@ type
     procedure AccountPageShowsTheSignInAccount;
 
     [Test]
+    procedure AccountPageWithoutSignInAccountOmitsIt;
+
+    [Test]
     procedure PostsWithoutSessionAreRejected;
 
     [Test]
@@ -698,6 +701,22 @@ begin
   Assert.AreEqual(StatusOk, Response.StatusCode, Response.Body);
   Assert.Contains(Response.Body, 'Signed in as <strong>Test User</strong> with <strong>alice@example.test</strong>');
   Assert.Contains(Response.Body, SecondObjectId + '@example.test');
+end;
+
+procedure TAccountControllerTests.AccountPageWithoutSignInAccountOmitsIt;
+begin
+  var User := Default(TAuthUser);
+  User.Id           := 'user-without-identity';
+  User.DisplayName  := 'Lone User';
+  User.CreatedAtUtc := FClock.NowUtc;
+  FStores.Users.Save(User);
+  var SetCookie: string;
+  FSessions.Start(User.Id, SetCookie);
+
+  const Response = FRouter.Dispatch(NewRequest('GET', '/account', '', '', CookieValue(SetCookie)));
+
+  Assert.AreEqual(StatusOk, Response.StatusCode, Response.Body);
+  Assert.Contains(Response.Body, 'Signed in as <strong>Lone User</strong>. Here you choose');
 end;
 
 procedure TAccountControllerTests.PostsWithoutSessionAreRejected;

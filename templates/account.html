@@ -11,7 +11,7 @@
 <div class="account-page">
   <section class="intro">
     <h1>Your account</h1>
-    <p class="lead">Signed in as <strong>@page.UserDisplayName</strong> with <strong>@page.SignInUserName</strong>. Here you choose which accounts your connectors may use, and which apps have access.</p>
+    <p class="lead">Signed in as <strong>@page.UserDisplayName</strong>@if page.HasSignInAccount { with <strong>@page.SignInUserName</strong>}. Here you choose which accounts your connectors may use, and which apps have access.</p>
   </section>
 
   <div class="account-columns">
