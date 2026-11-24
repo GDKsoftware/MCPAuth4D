@@ -14,6 +14,16 @@ type
     procedure Save(const User: TAuthUser);
   end;
 
+  ILoginIdentityRepository = interface
+    ['{5B9E2D47-1C83-4A6F-B0E5-8D3F72A1C946}']
+    function TryFind(const Key: TAccountKey; out Identity: TLoginIdentity): Boolean;
+    // Ordered by CreatedAtUtc.
+    function ListForUser(const UserId: string): IReadOnlyList<TLoginIdentity>;
+
+    // Inserts or updates. Raises ELoginIdentityTaken when the key is the login identity of another user.
+    procedure Save(const Identity: TLoginIdentity);
+  end;
+
   ILinkedAccountRepository = interface
     ['{C3F18A5D-62B7-4E09-9A4C-7D1E5B8F2A60}']
     function TryFind(const Key: TAccountKey; out Account: TLinkedAccount): Boolean;

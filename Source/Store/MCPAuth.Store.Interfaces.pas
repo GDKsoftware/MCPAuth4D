@@ -18,6 +18,7 @@ type
 
   TStoreSet = record
     Users: IUserRepository;
+    LoginIdentities: ILoginIdentityRepository;
     LinkedAccounts: ILinkedAccountRepository;
     Clients: IClientRepository;
     Pending: IPendingAuthorizationStore;

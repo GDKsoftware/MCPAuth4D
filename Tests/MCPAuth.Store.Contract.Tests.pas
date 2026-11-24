@@ -25,6 +25,8 @@ type
 
     function BaseTime: TDateTime;
     function NewAccount(const UserId, ObjectId: string): TLinkedAccount;
+    function NewIdentity(const UserId, TenantId, ObjectId: string): TLoginIdentity;
+    procedure SaveUser(const UserId: string);
     function NewPending(const Id: string; const ExpiresAtUtc: TDateTime): TPendingAuthorization;
     function NewGrant(const CodeHash: string; const ExpiresAtUtc: TDateTime): TAuthorizationGrant;
     function NewToken(const Hash, FamilyId, UserId: string; const ExpiresAtUtc: TDateTime): TIssuedToken;
@@ -133,6 +135,21 @@ type
 
     [Test]
     procedure ClientWithNonAsciiNameRoundTrips;
+
+    [Test]
+    procedure LoginIdentityRoundTrips;
+
+    [Test]
+    procedure IdentityIsFoundRegardlessOfKeyCase;
+
+    [Test]
+    procedure SavingIdentityOfOtherUserRaises;
+
+    [Test]
+    procedure SavingOwnIdentityAgainUpdatesIt;
+
+    [Test]
+    procedure ListIdentitiesForUserReturnsOnlyOwn;
   end;
 
 implementation
@@ -206,6 +223,27 @@ begin
   Result.NeedsReconnect := True;
   Result.LinkedAtUtc := BaseTime;
   Result.UpdatedAtUtc := IncHour(BaseTime, 1);
+end;
+
+function TStoreContractTests.NewIdentity(const UserId, TenantId, ObjectId: string): TLoginIdentity;
+begin
+  Result := Default(TLoginIdentity);
+  Result.Key.Provider    := 'microsoft';
+  Result.Key.TenantId    := TenantId;
+  Result.Key.ObjectId    := ObjectId;
+  Result.UserId          := UserId;
+  Result.UserName        := ObjectId + '@example.test';
+  Result.CreatedAtUtc    := BaseTime;
+  Result.LastLoginAtUtc  := IncHour(BaseTime, 1);
+end;
+
+procedure TStoreContractTests.SaveUser(const UserId: string);
+begin
+  var User := Default(TAuthUser);
+  User.Id           := UserId;
+  User.DisplayName  := 'User ' + UserId;
+  User.CreatedAtUtc := BaseTime;
+  FStores.Users.Save(User);
 end;
 
 function TStoreContractTests.NewPending(const Id: string; const ExpiresAtUtc: TDateTime): TPendingAuthorization;
@@ -821,6 +859,92 @@ begin
 
   Assert.IsTrue(IsFound);
   Assert.AreEqual(MixedName, Actual.ClientName);
+end;
+
+procedure TStoreContractTests.LoginIdentityRoundTrips;
+begin
+  RequireStore;
+  SaveUser('user-1');
+
+  const Expected = NewIdentity('user-1', 'tenant-1', 'object-1');
+  FStores.LoginIdentities.Save(Expected);
+
+  var Actual: TLoginIdentity;
+  const IsFound = FStores.LoginIdentities.TryFind(Expected.Key, Actual);
+
+  Assert.IsTrue(IsFound);
+  Assert.AreEqual(Expected.Key.Provider, Actual.Key.Provider);
+  Assert.AreEqual(Expected.Key.TenantId, Actual.Key.TenantId);
+  Assert.AreEqual(Expected.Key.ObjectId, Actual.Key.ObjectId);
+  Assert.AreEqual(Expected.UserId, Actual.UserId);
+  Assert.AreEqual(Expected.UserName, Actual.UserName);
+  Assert.AreEqual(Expected.CreatedAtUtc, Actual.CreatedAtUtc);
+  Assert.AreEqual(Expected.LastLoginAtUtc, Actual.LastLoginAtUtc);
+end;
+
+procedure TStoreContractTests.IdentityIsFoundRegardlessOfKeyCase;
+begin
+  RequireStore;
+  SaveUser('user-1');
+  FStores.LoginIdentities.Save(NewIdentity('user-1', 'Tenant-A', 'object-1'));
+
+  var Actual: TLoginIdentity;
+  const IsFound = FStores.LoginIdentities.TryFind(NewIdentity('user-1', 'tenant-a', 'object-1').Key, Actual);
+
+  Assert.IsTrue(IsFound);
+  Assert.AreEqual('user-1', Actual.UserId);
+end;
+
+procedure TStoreContractTests.SavingIdentityOfOtherUserRaises;
+begin
+  RequireStore;
+  SaveUser('user-1');
+  SaveUser('user-2');
+  const Original = NewIdentity('user-1', 'tenant-1', 'object-1');
+  FStores.LoginIdentities.Save(Original);
+  const Hijack = NewIdentity('user-2', 'tenant-1', 'object-1');
+
+  Assert.WillRaise(
+    procedure
+    begin
+      FStores.LoginIdentities.Save(Hijack);
+    end,
+    ELoginIdentityTaken);
+
+  var Actual: TLoginIdentity;
+  Assert.IsTrue(FStores.LoginIdentities.TryFind(Original.Key, Actual));
+  Assert.AreEqual('user-1', Actual.UserId);
+end;
+
+procedure TStoreContractTests.SavingOwnIdentityAgainUpdatesIt;
+begin
+  RequireStore;
+  SaveUser('user-1');
+  const Original = NewIdentity('user-1', 'tenant-1', 'object-1');
+  FStores.LoginIdentities.Save(Original);
+  var Later := Original;
+  Later.LastLoginAtUtc := IncDay(BaseTime, 3);
+
+  FStores.LoginIdentities.Save(Later);
+
+  var Actual: TLoginIdentity;
+  Assert.IsTrue(FStores.LoginIdentities.TryFind(Original.Key, Actual));
+  Assert.AreEqual(IncDay(BaseTime, 3), Actual.LastLoginAtUtc);
+  Assert.AreEqual(BaseTime, Actual.CreatedAtUtc);
+end;
+
+procedure TStoreContractTests.ListIdentitiesForUserReturnsOnlyOwn;
+begin
+  RequireStore;
+  SaveUser('user-1');
+  SaveUser('user-2');
+  FStores.LoginIdentities.Save(NewIdentity('user-1', 'tenant-1', 'object-1'));
+  FStores.LoginIdentities.Save(NewIdentity('user-2', 'tenant-1', 'object-2'));
+
+  const Identities = FStores.LoginIdentities.ListForUser('user-1');
+
+  Assert.AreEqual(1, Identities.Count);
+  Assert.AreEqual('object-1', Identities[0].Key.ObjectId);
 end;
 
 end.

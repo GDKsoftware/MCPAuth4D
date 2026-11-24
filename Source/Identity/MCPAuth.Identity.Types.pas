@@ -32,6 +32,15 @@ type
     UpdatedAtUtc: TDateTime;
   end;
 
+  // The upstream account a user signs in with. Linked accounts only give upstream access; they never sign anyone in.
+  TLoginIdentity = record
+    Key: TAccountKey;
+    UserId: string;
+    UserName: string;
+    CreatedAtUtc: TDateTime;
+    LastLoginAtUtc: TDateTime;
+  end;
+
 implementation
 
 { TAccountKey }

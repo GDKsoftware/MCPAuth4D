@@ -11,6 +11,7 @@ type
   EUserNotFound = class(Exception);
   ELinkedAccountNotFound = class(Exception);
   ELastAccountCannotBeUnlinked = class(Exception);
+  ELoginIdentityTaken = class(Exception);
 
   ELinkedAccountNeedsReconnect = class(Exception)
   private
