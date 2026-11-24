@@ -114,6 +114,12 @@ type
     procedure LinkCallbackWithOtherSessionUserIsRejected;
 
     [Test]
+    procedure LinkingAccountOfOtherUserCompletes;
+
+    [Test]
+    procedure AccountPageShowsTheSignInAccount;
+
+    [Test]
     procedure PostsWithoutSessionAreRejected;
 
     [Test]
@@ -663,6 +669,35 @@ begin
   Assert.AreEqual(StatusForbidden, Callback.StatusCode, Callback.Body);
   Assert.IsEmpty(Callback.Location);
   Assert.AreEqual<Integer>(1, CountAccounts(AttackerId), 'the victim account is not linked to the attacker');
+end;
+
+procedure TAccountControllerTests.LinkingAccountOfOtherUserCompletes;
+begin
+  const OwnerCookie = SignInAs(FirstObjectId, 'Owner', 'owner@example.test');
+  const OwnerId = UserIdOf(OwnerCookie);
+  const OtherCookie = SignInAs(OtherObjectId, 'Colleague', 'colleague@example.test');
+  const OtherId = UserIdOf(OtherCookie);
+  const LoginCookie = StartLinking(OtherCookie);
+
+  FProvider.SetIdentity(TenantId, FirstObjectId, 'Owner', 'owner@example.test');
+  const Callback = FRouter.Dispatch(CallbackRequest(LoginCookie, OtherCookie));
+
+  Assert.AreEqual(StatusFound, Callback.StatusCode, Callback.Body);
+  Assert.AreEqual('/account', Callback.Location);
+  Assert.AreEqual<Integer>(2, CountAccounts(OtherId), 'linked for the colleague');
+  Assert.AreEqual<Integer>(1, CountAccounts(OwnerId), 'the owner keeps his own link');
+end;
+
+procedure TAccountControllerTests.AccountPageShowsTheSignInAccount;
+begin
+  const SessionCookie = SignInAs(FirstObjectId, 'Test User', 'alice@example.test');
+  AddAccount(UserIdOf(SessionCookie), SecondObjectId, 'Shared Mailbox');
+
+  const Response = FRouter.Dispatch(NewRequest('GET', '/account', '', '', SessionCookie));
+
+  Assert.AreEqual(StatusOk, Response.StatusCode, Response.Body);
+  Assert.Contains(Response.Body, 'Signed in as <strong>Test User</strong> with <strong>alice@example.test</strong>');
+  Assert.Contains(Response.Body, SecondObjectId + '@example.test');
 end;
 
 procedure TAccountControllerTests.PostsWithoutSessionAreRejected;

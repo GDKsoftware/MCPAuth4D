@@ -57,6 +57,7 @@ type
     function ResourceNameOf(const ResourceUri: string): string;
     function ClientNameOf(const ClientId: string): string;
     function UserDisplayNameOf(const UserId: string): string;
+    function SignInUserNameOf(const UserId: string): string;
 
     function Link(const Request: TWebRequest; const Session: TWebSession): TWebResponse;
     function Reconnect(const Request: TWebRequest; const Session: TWebSession): TWebResponse;
@@ -299,6 +300,7 @@ begin
     Result.Title           := AccountTitle;
     Result.Csrf            := Session.CsrfToken;
     Result.UserDisplayName := UserDisplayNameOf(Session.UserId);
+    Result.SignInUserName  := SignInUserNameOf(Session.UserId);
     Result.Providers       := FProviders.Names;
     BuildAccountRows(Result, Session.UserId);
     BuildGrantRows(Result, Session.UserId);
@@ -375,6 +377,15 @@ begin
     Result := User.DisplayName
   else
     Result := '';
+end;
+
+function TAccountController.SignInUserNameOf(const UserId: string): string;
+begin
+  const Identities = FStores.LoginIdentities.ListForUser(UserId);
+  if Identities.IsEmpty then
+    Result := ''
+  else
+    Result := Identities.First.UserName;
 end;
 
 function TAccountController.Link(const Request: TWebRequest; const Session: TWebSession): TWebResponse;
