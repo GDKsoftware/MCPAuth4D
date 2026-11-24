@@ -12,6 +12,7 @@ type
     ['{0E7A4C21-8B35-4D96-A1F0-52C9D3B6E847}']
     function TryGet(const UserId: string; out User: TAuthUser): Boolean;
     procedure Save(const User: TAuthUser);
+    procedure Delete(const UserId: string);
   end;
 
   ILoginIdentityRepository = interface

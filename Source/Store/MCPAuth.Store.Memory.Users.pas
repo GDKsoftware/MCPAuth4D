@@ -20,6 +20,7 @@ type
 
     function TryGet(const UserId: string; out User: TAuthUser): Boolean;
     procedure Save(const User: TAuthUser);
+    procedure Delete(const UserId: string);
   end;
 
 implementation
@@ -54,6 +55,16 @@ begin
   FLock.Enter;
   try
     FUsers[User.Id] := User;
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TMemoryUserRepository.Delete(const UserId: string);
+begin
+  FLock.Enter;
+  try
+    FUsers.Remove(UserId);
   finally
     FLock.Leave;
   end;

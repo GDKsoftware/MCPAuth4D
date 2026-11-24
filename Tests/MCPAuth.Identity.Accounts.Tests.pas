@@ -15,7 +15,8 @@ uses
   MCPAuth.Identity.Types,
   MCPAuth.Fakes.AccessPolicy,
   MCPAuth.Fakes.Clock,
-  MCPAuth.Fakes.UpstreamProvider;
+  MCPAuth.Fakes.UpstreamProvider,
+  MCPAuth.Fakes.LoginIdentities;
 
 type
   [TestFixture]
@@ -52,6 +53,9 @@ type
 
     [Test]
     procedure SignInWithAccountLinkedByOtherUserCreatesNewUser;
+
+    [Test]
+    procedure LosingIdentityRaceRemovesTheNewUser;
 
     [Test]
     procedure SignInWithIdentityYieldsSameUserAndUpdatesLastLogin;
@@ -413,6 +417,26 @@ begin
   Assert.AreNotEqual(Owner.Id, SignedIn.Id);
   Assert.AreEqual(2, FAccounts.ListForUser(Owner.Id).Count);
   Assert.AreEqual('refresh-2', StoredRefreshToken(Owner.Id, 'object-2'));
+end;
+
+procedure TLinkedAccountsTests.LosingIdentityRaceRemovesTheNewUser;
+begin
+  var Winner := Default(TAuthUser);
+  Winner.Id           := 'winner-user';
+  Winner.DisplayName  := 'Winner';
+  Winner.CreatedAtUtc := FClock.NowUtc;
+  FStores.Users.Save(Winner);
+  const Racing = TRacingLoginIdentityRepository.Create(FStores.LoginIdentities);
+  const RacingReference: ILoginIdentityRepository = Racing;
+  Racing.WinnerUserId := Winner.Id;
+  const Accounts: ILinkedAccounts = TLinkedAccounts.Create(FStores.Users, RacingReference, FStores.LinkedAccounts, FProtector, FPolicyReference, TUpstreamProviders.Create([FProviderReference]), FClockReference);
+
+  const User = Accounts.ResolveOrCreateUser(TokensFor('object-1', 'refresh-1'));
+
+  Assert.AreEqual(Winner.Id, User.Id);
+  var Orphan: TAuthUser;
+  Assert.IsFalse(Racing.LosingUserId.IsEmpty, 'the race happened');
+  Assert.IsFalse(FStores.Users.TryGet(Racing.LosingUserId, Orphan), 'the losing user is removed');
 end;
 
 procedure TLinkedAccountsTests.SignInWithIdentityYieldsSameUserAndUpdatesLastLogin;

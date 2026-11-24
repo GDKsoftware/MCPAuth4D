@@ -182,7 +182,16 @@ begin
   LoginIdentity.UserName       := Identity.UserName;
   LoginIdentity.CreatedAtUtc   := Result.CreatedAtUtc;
   LoginIdentity.LastLoginAtUtc := Result.CreatedAtUtc;
-  FIdentities.Save(LoginIdentity);
+  try
+    FIdentities.Save(LoginIdentity);
+  except
+    // Another process created the identity first; the user made for it here would stay behind without one.
+    on ELoginIdentityTaken do
+    begin
+      FUsers.Delete(Result.Id);
+      raise;
+    end;
+  end;
 end;
 
 function TLinkedAccounts.Link(const UserId: string; const Tokens: TUpstreamTokens): TLinkedAccount;

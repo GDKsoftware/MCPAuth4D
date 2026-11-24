@@ -61,6 +61,9 @@ type
     procedure UnknownUserIsNotFound;
 
     [Test]
+    procedure DeletedUserIsNotFound;
+
+    [Test]
     procedure LinkedAccountRoundTrips;
 
     [Test]
@@ -337,6 +340,19 @@ begin
   const IsFound = FStores.Users.TryGet('nobody', Found);
 
   Assert.IsFalse(IsFound);
+end;
+
+procedure TStoreContractTests.DeletedUserIsNotFound;
+begin
+  RequireStore;
+  SaveUser('user-1');
+  SaveUser('user-2');
+
+  FStores.Users.Delete('user-1');
+
+  var Found: TAuthUser;
+  Assert.IsFalse(FStores.Users.TryGet('user-1', Found));
+  Assert.IsTrue(FStores.Users.TryGet('user-2', Found));
 end;
 
 procedure TStoreContractTests.LinkedAccountRoundTrips;
