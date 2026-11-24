@@ -7,6 +7,7 @@ uses
   MCPAuth.Clock.Interfaces,
   MCPAuth.Secret.Interfaces,
   MCPAuth.Store.Interfaces,
+  MCPAuth.Store.FireDAC.Interfaces,
   MCPAuth.Store.FireDAC.PgDriver,
   MCPAuth.Resource.Interfaces,
   MCPAuth.Upstream.Interfaces,
@@ -55,6 +56,7 @@ type
 
     procedure BuildStores;
     procedure BuildPostgresStores;
+    procedure AddMissingLoginIdentities(const Factory: IFireDACConnectionFactory);
     procedure BuildRegistry;
     procedure BuildProviders;
     function BuildMicrosoftProvider: IUpstreamProvider;
@@ -93,8 +95,8 @@ uses
   MCPAuth.Secret.AesGcm,
   MCPAuth.Store.Memory,
   MCPAuth.Store.FireDAC,
-  MCPAuth.Store.FireDAC.Interfaces,
   MCPAuth.Store.FireDAC.ConnectionFactory,
+  MCPAuth.Store.FireDAC.LoginIdentities,
   MCPAuth.Store.FireDAC.Migrations,
   MCPAuth.Resource.Types,
   MCPAuth.Resource.Registry.Json,
@@ -296,8 +298,20 @@ begin
   const ConnectionString = WithDatabaseTimeouts(FSettings.DatabaseConnection);
   const Factory: IFireDACConnectionFactory = TFireDACConnectionFactory.Create(ConnectionString);
   TFireDACMigrations.Apply(Factory, PostgresDialect, FSettings.MigrationsPath);
+  AddMissingLoginIdentities(Factory);
 
   FStores := TFireDACStore.CreateSet(Factory, FClock);
+end;
+
+procedure TServerComposition.AddMissingLoginIdentities(const Factory: IFireDACConnectionFactory);
+begin
+  // A release before login identities may still have created users while this release's migrations were applied.
+  const Identities = TFireDACLoginIdentityRepository.Create(Factory);
+  try
+    Identities.AddMissing;
+  finally
+    Identities.Free;
+  end;
 end;
 
 procedure TServerComposition.BuildServices;
@@ -309,7 +323,7 @@ begin
 
   const Protector = TAesGcmProtector.Create(FSettings.KeyRing);
   FTokens := TTokenGenerator.Create;
-  FAccounts := TLinkedAccounts.Create(FStores.Users, FStores.LinkedAccounts, Protector, TAllowAllAccessPolicy.Create, FProviders, FClock);
+  FAccounts := TLinkedAccounts.Create(FStores.Users, FStores.LoginIdentities, FStores.LinkedAccounts, Protector, TAllowAllAccessPolicy.Create, FProviders, FClock);
   FAuthorizationServer := TAuthorizationServer.Create(FStores, FRegistry, FProviders, FAccounts, FTokens, FAuthSettings, FClock);
   FSessions := TWebSessions.Create(FStores.Sessions, FTokens, FAuthSettings, FClock);
   FPages := TWebStencilsPageRenderer.Create(FAuthSettings.ProjectTemplatesPath, FAuthSettings.LibraryTemplatesPath);

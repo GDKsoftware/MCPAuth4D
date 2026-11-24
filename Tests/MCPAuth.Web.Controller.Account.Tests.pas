@@ -53,7 +53,7 @@ type
     function KeyAndCsrfBody(const Key: TAccountKey; const Csrf: string): string;
     procedure AddAccount(const UserId, ObjectId, DisplayName: string);
     procedure AddGrant(const UserId, FamilyId, ClientId: string);
-    procedure MarkNeedsReconnect(const Key: TAccountKey);
+    procedure MarkNeedsReconnect(const UserId: string; const Key: TAccountKey);
     function IsSessionStored(const SessionCookie: string): Boolean;
     function CountAccounts(const UserId: string): Integer;
     function CountGrants(const UserId: string): Integer;
@@ -90,7 +90,7 @@ type
     procedure UnlinkRemovesTheAccount;
 
     [Test]
-    procedure UnlinkLastAccountShowsError;
+    procedure UnlinkLastAccountRedirectsToAccountPage;
 
     [Test]
     procedure RevokeRemovesGrant;
@@ -181,7 +181,6 @@ const
   StatusBadRequest = 400;
   StatusForbidden = 403;
   StatusNotFound = 404;
-  StatusConflict = 409;
   FirstObjectId = 'object-1';
   SecondObjectId = 'object-2';
   OtherObjectId = 'object-other';
@@ -281,7 +280,7 @@ begin
 
   const Tokens = TTokenGenerator.Create;
   const UpstreamProviders = TUpstreamProviders.Create(Providers);
-  FAccounts := TLinkedAccounts.Create(FStores.Users, FStores.LinkedAccounts, Protector, TAllowAllAccessPolicy.Create, UpstreamProviders, FClockReference);
+  FAccounts := TLinkedAccounts.Create(FStores.Users, FStores.LoginIdentities, FStores.LinkedAccounts, Protector, TAllowAllAccessPolicy.Create, UpstreamProviders, FClockReference);
   const Registry = TJsonResourceRegistry.FromJson(BuildResourceRegistryJson);
   const Server: IAuthorizationServer = TAuthorizationServer.Create(FStores, Registry, UpstreamProviders, FAccounts, Tokens, FSettings, FClockReference);
   const Pages = TWebStencilsPageRenderer.Create('', FindLibraryTemplatesPath);
@@ -407,10 +406,10 @@ begin
   FStores.Tokens.Save(Token);
 end;
 
-procedure TAccountControllerTests.MarkNeedsReconnect(const Key: TAccountKey);
+procedure TAccountControllerTests.MarkNeedsReconnect(const UserId: string; const Key: TAccountKey);
 begin
   var Account: TLinkedAccount;
-  Assert.IsTrue(FStores.LinkedAccounts.TryFind(Key, Account), 'account exists');
+  Assert.IsTrue(FStores.LinkedAccounts.TryFind(UserId, Key, Account), 'account exists');
 
   Account.NeedsReconnect := True;
   FStores.LinkedAccounts.Save(Account);
@@ -483,7 +482,7 @@ begin
   const Healthy = FRouter.Dispatch(NewRequest('GET', '/account', '', '', SessionCookie));
   Assert.IsFalse(Healthy.Body.Contains('action="/account/reconnect"'), 'no reconnect while connected');
 
-  MarkNeedsReconnect(UserKey(FirstObjectId));
+  MarkNeedsReconnect(UserIdOf(SessionCookie), UserKey(FirstObjectId));
   const Response = FRouter.Dispatch(NewRequest('GET', '/account', '', '', SessionCookie));
 
   Assert.AreEqual(StatusOk, Response.StatusCode, Response.Body);
@@ -497,7 +496,7 @@ begin
   const SessionCookie = SignInAs(FirstObjectId, 'Test User', 'user@example.test');
   const UserId = UserIdOf(SessionCookie);
   const Key = UserKey(FirstObjectId);
-  MarkNeedsReconnect(Key);
+  MarkNeedsReconnect(UserId, Key);
 
   const Reconnect = PostForm('/account/reconnect', KeyAndCsrfBody(Key, CsrfOf(SessionCookie)), SessionCookie);
   Assert.AreEqual(StatusFound, Reconnect.StatusCode, Reconnect.Body);
@@ -509,7 +508,7 @@ begin
   Assert.AreEqual('/account', Callback.Location, Callback.Body);
 
   var Account: TLinkedAccount;
-  Assert.IsTrue(FStores.LinkedAccounts.TryFind(Key, Account), 'account kept');
+  Assert.IsTrue(FStores.LinkedAccounts.TryFind(UserId, Key, Account), 'account kept');
   Assert.IsFalse(Account.NeedsReconnect, 'flag cleared');
   Assert.AreEqual<Integer>(1, CountAccounts(UserId), 'same account, not a second one');
 
@@ -556,17 +555,16 @@ begin
   Assert.AreEqual<Integer>(1, CountAccounts(UserId));
 end;
 
-procedure TAccountControllerTests.UnlinkLastAccountShowsError;
+procedure TAccountControllerTests.UnlinkLastAccountRedirectsToAccountPage;
 begin
   const SessionCookie = SignInAs(FirstObjectId, 'Test User', 'user@example.test');
   const UserId = UserIdOf(SessionCookie);
 
   const Response = PostForm('/account/unlink', KeyAndCsrfBody(UserKey(FirstObjectId), CsrfOf(SessionCookie)), SessionCookie);
 
-  Assert.AreEqual(StatusConflict, Response.StatusCode, Response.Body);
-  Assert.StartsWith('text/html', Response.ContentType);
-  Assert.Contains(Response.Body, 'last linked account');
-  Assert.AreEqual<Integer>(1, CountAccounts(UserId), 'account kept');
+  Assert.AreEqual(StatusFound, Response.StatusCode, Response.Body);
+  Assert.AreEqual('/account', Response.Location);
+  Assert.AreEqual<Integer>(0, CountAccounts(UserId), 'account removed');
 end;
 
 procedure TAccountControllerTests.RevokeRemovesGrant;

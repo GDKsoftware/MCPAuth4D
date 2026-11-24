@@ -276,7 +276,7 @@ begin
 
   const Tokens = TTokenGenerator.Create;
   const Providers = TUpstreamProviders.Create([FProviderReference]);
-  const Accounts: ILinkedAccounts = TLinkedAccounts.Create(FStores.Users, FStores.LinkedAccounts, Protector, TAllowAllAccessPolicy.Create, Providers, FClockReference);
+  const Accounts: ILinkedAccounts = TLinkedAccounts.Create(FStores.Users, FStores.LoginIdentities, FStores.LinkedAccounts, Protector, TAllowAllAccessPolicy.Create, Providers, FClockReference);
   const Registry = TJsonResourceRegistry.FromJson(BuildResourceRegistryJson);
   const Server: IAuthorizationServer = TAuthorizationServer.Create(FStores, Registry, Providers, Accounts, Tokens, FSettings, FClockReference);
   const Pages = TWebStencilsPageRenderer.Create('', FindLibraryTemplatesPath);

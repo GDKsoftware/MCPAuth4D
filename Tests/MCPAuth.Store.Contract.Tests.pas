@@ -35,6 +35,8 @@ type
     procedure RunWorker(const Worker: Integer);
     function CreateWorker(const Worker: Integer): TThread;
     function CountMissingKeys: Integer;
+    procedure RunLinkWorker(const Worker: Integer);
+    function CreateLinkWorker(const Worker: Integer): TThread;
 
   protected
     // Passes the running test when UnavailableReason is not empty.
@@ -62,7 +64,16 @@ type
     procedure LinkedAccountRoundTrips;
 
     [Test]
-    procedure SavingKeyOfOtherUserRaises;
+    procedure SameAccountForTwoUsersAreSeparateRows;
+
+    [Test]
+    procedure DeleteOfOneUserKeepsTheOtherRow;
+
+    [Test]
+    procedure TryFindOfOtherUserIsFalse;
+
+    [Test]
+    procedure ConcurrentSavesOfSameAccountForTwoUsersKeepBothRows;
 
     [Test]
     procedure ListForUserReturnsOnlyOwnAccounts;
@@ -163,6 +174,7 @@ uses
 const
   ThreadCount = 8;
   SavesPerThread = 200;
+  LinkSavesPerThread = 20;
   SharedTokenHash = 'shared-token';
   // 'Jos' + e acute + ' M' + u umlaut + 'ller-' + O stroke + 'deg' + a ring + 'rd'
   LatinName = 'Jos'#$00E9' M'#$00FC'ller-'#$00D8'deg'#$00E5'rd';
@@ -335,7 +347,7 @@ begin
   FStores.LinkedAccounts.Save(Expected);
 
   var Actual: TLinkedAccount;
-  const IsFound = FStores.LinkedAccounts.TryFind(Expected.Key, Actual);
+  const IsFound = FStores.LinkedAccounts.TryFind(Expected.UserId, Expected.Key, Actual);
 
   Assert.IsTrue(IsFound);
   Assert.AreEqual(Expected.Key.Provider, Actual.Key.Provider);
@@ -351,26 +363,82 @@ begin
   Assert.AreEqual<TBytes>(Expected.ProtectedRefreshToken, Actual.ProtectedRefreshToken);
 end;
 
-procedure TStoreContractTests.SavingKeyOfOtherUserRaises;
+procedure TStoreContractTests.SameAccountForTwoUsersAreSeparateRows;
 begin
   RequireStore;
 
-  const Original = NewAccount('user-1', 'object-1');
-  FStores.LinkedAccounts.Save(Original);
-  var Hijack := NewAccount('user-2', 'object-1');
-  Hijack.DisplayName := 'Hijacked';
+  var First := NewAccount('user-1', 'object-1');
+  First.DisplayName := 'One';
+  First.ProtectedRefreshToken := TBytes.Create(1);
+  var Second := NewAccount('user-2', 'object-1');
+  Second.DisplayName := 'Two';
+  Second.ProtectedRefreshToken := TBytes.Create(2);
 
-  Assert.WillRaise(
-    procedure
-    begin
-      FStores.LinkedAccounts.Save(Hijack);
-    end,
-    EAccountLinkedToOtherUser);
+  FStores.LinkedAccounts.Save(First);
+  FStores.LinkedAccounts.Save(Second);
 
   var Actual: TLinkedAccount;
-  Assert.IsTrue(FStores.LinkedAccounts.TryFind(Original.Key, Actual));
-  Assert.AreEqual('user-1', Actual.UserId);
-  Assert.AreEqual(Original.DisplayName, Actual.DisplayName);
+  Assert.IsTrue(FStores.LinkedAccounts.TryFind('user-1', First.Key, Actual));
+  Assert.AreEqual('One', Actual.DisplayName);
+  Assert.AreEqual<TBytes>(TBytes.Create(1), Actual.ProtectedRefreshToken);
+  Assert.IsTrue(FStores.LinkedAccounts.TryFind('user-2', First.Key, Actual));
+  Assert.AreEqual('Two', Actual.DisplayName);
+  Assert.AreEqual<TBytes>(TBytes.Create(2), Actual.ProtectedRefreshToken);
+end;
+
+procedure TStoreContractTests.DeleteOfOneUserKeepsTheOtherRow;
+begin
+  RequireStore;
+
+  const First = NewAccount('user-1', 'object-1');
+  FStores.LinkedAccounts.Save(First);
+  FStores.LinkedAccounts.Save(NewAccount('user-2', 'object-1'));
+
+  FStores.LinkedAccounts.Delete('user-1', First.Key);
+
+  var Found: TLinkedAccount;
+  Assert.IsFalse(FStores.LinkedAccounts.TryFind('user-1', First.Key, Found));
+  Assert.IsTrue(FStores.LinkedAccounts.TryFind('user-2', First.Key, Found));
+end;
+
+procedure TStoreContractTests.TryFindOfOtherUserIsFalse;
+begin
+  RequireStore;
+
+  const Account = NewAccount('user-1', 'object-1');
+  FStores.LinkedAccounts.Save(Account);
+
+  var Found: TLinkedAccount;
+  const IsFound = FStores.LinkedAccounts.TryFind('user-2', Account.Key, Found);
+
+  Assert.IsFalse(IsFound);
+end;
+
+procedure TStoreContractTests.ConcurrentSavesOfSameAccountForTwoUsersKeepBothRows;
+begin
+  RequireStore;
+
+  FFailures := 0;
+  var Workers: TArray<TThread>;
+  SetLength(Workers, ThreadCount);
+  for var Worker := 0 to ThreadCount - 1 do
+  begin
+    Workers[Worker] := CreateLinkWorker(Worker);
+  end;
+
+  for var Worker in Workers do
+  begin
+    Worker.Start;
+  end;
+  for var Worker in Workers do
+  begin
+    Worker.WaitFor;
+    Worker.Free;
+  end;
+
+  Assert.AreEqual(0, FFailures);
+  Assert.AreEqual(1, FStores.LinkedAccounts.ListForUser('user-1').Count);
+  Assert.AreEqual(1, FStores.LinkedAccounts.ListForUser('user-2').Count);
 end;
 
 procedure TStoreContractTests.ListForUserReturnsOnlyOwnAccounts;
@@ -402,8 +470,8 @@ begin
   FStores.LinkedAccounts.Delete('user-1', First.Key);
 
   var Found: TLinkedAccount;
-  Assert.IsFalse(FStores.LinkedAccounts.TryFind(First.Key, Found));
-  Assert.IsTrue(FStores.LinkedAccounts.TryFind(Second.Key, Found));
+  Assert.IsFalse(FStores.LinkedAccounts.TryFind('user-1', First.Key, Found));
+  Assert.IsTrue(FStores.LinkedAccounts.TryFind('user-1', Second.Key, Found));
 end;
 
 procedure TStoreContractTests.PendingCanBeReadThenTakenOnce;
@@ -760,6 +828,29 @@ begin
   Result.FreeOnTerminate := False;
 end;
 
+procedure TStoreContractTests.RunLinkWorker(const Worker: Integer);
+begin
+  try
+    const UserId = Format('user-%d', [1 + (Worker mod 2)]);
+    for var SaveIndex := 0 to LinkSavesPerThread - 1 do
+    begin
+      FStores.LinkedAccounts.Save(NewAccount(UserId, 'object-shared'));
+    end;
+  except
+    TInterlocked.Increment(FFailures);
+  end;
+end;
+
+function TStoreContractTests.CreateLinkWorker(const Worker: Integer): TThread;
+begin
+  Result := TThread.CreateAnonymousThread(
+    procedure
+    begin
+      RunLinkWorker(Worker);
+    end);
+  Result.FreeOnTerminate := False;
+end;
+
 function TStoreContractTests.CountMissingKeys: Integer;
 begin
   Result := 0;
@@ -836,7 +927,7 @@ begin
   FStores.LinkedAccounts.Save(Expected);
 
   var Actual: TLinkedAccount;
-  const IsFound = FStores.LinkedAccounts.TryFind(Expected.Key, Actual);
+  const IsFound = FStores.LinkedAccounts.TryFind(Expected.UserId, Expected.Key, Actual);
 
   Assert.IsTrue(IsFound);
   Assert.AreEqual(LatinName, Actual.DisplayName);

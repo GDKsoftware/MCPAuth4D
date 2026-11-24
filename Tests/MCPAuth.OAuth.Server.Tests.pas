@@ -208,7 +208,7 @@ begin
   const Protector = TAesGcmProtector.Create(TKeyRing.Create(KeyId, Keys));
 
   const Providers = TUpstreamProviders.Create([FProviderReference]);
-  const Accounts: ILinkedAccounts = TLinkedAccounts.Create(FStores.Users, FStores.LinkedAccounts, Protector, TAllowAllAccessPolicy.Create, Providers, FClockReference);
+  const Accounts: ILinkedAccounts = TLinkedAccounts.Create(FStores.Users, FStores.LoginIdentities, FStores.LinkedAccounts, Protector, TAllowAllAccessPolicy.Create, Providers, FClockReference);
   const Registry = TJsonResourceRegistry.FromJson(BuildResourceRegistryJson);
 
   FServer := TAuthorizationServer.Create(FStores, Registry, Providers, Accounts, TTokenGenerator.Create, FSettings, FClockReference);

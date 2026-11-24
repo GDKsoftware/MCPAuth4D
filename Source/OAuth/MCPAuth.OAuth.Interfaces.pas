@@ -64,7 +64,7 @@ type
 
     // Rejects a callback from another browser than the one that started the sign-in, and a link callback
     // whose session user is not the user who started linking; both before the provider is called.
-    // Also raises EUpstreamError from the provider and EAccessDenied or EAccountLinkedToOtherUser from the linked accounts.
+    // Also raises EUpstreamError from the provider and EAccessDenied from the linked accounts.
     function CompleteUpstream(const Callback: TUpstreamCallback): TUpstreamCompletion;
 
     function ConsentInfo(const PendingId: string): TConsentInfo;

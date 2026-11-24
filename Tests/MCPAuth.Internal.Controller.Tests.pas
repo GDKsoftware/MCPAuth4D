@@ -171,7 +171,7 @@ begin
   const Protector = TAesGcmProtector.Create(TKeyRing.Create(KeyId, Keys));
   const Providers = TUpstreamProviders.Create([FProviderReference, FOtherProvider]);
 
-  FAccounts := TLinkedAccounts.Create(FStores.Users, FStores.LinkedAccounts, Protector, TAllowAllAccessPolicy.Create, Providers, FClockReference);
+  FAccounts := TLinkedAccounts.Create(FStores.Users, FStores.LoginIdentities, FStores.LinkedAccounts, Protector, TAllowAllAccessPolicy.Create, Providers, FClockReference);
   FController := TInternalController.Create(TJsonResourceRegistry.FromJson(BuildResourceRegistryJson), FStores.Tokens, FAccounts);
   FRouter := TWebRouter.Create;
   FController.Register(FRouter);

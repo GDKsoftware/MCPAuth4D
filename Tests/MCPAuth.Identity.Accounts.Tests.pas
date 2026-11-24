@@ -34,10 +34,11 @@ type
     function TokensFor(const ObjectId, RefreshToken: string): TUpstreamTokens;
     function LinkAccount(const ObjectId, RefreshToken: string): TLinkedAccount;
     function KeyOf(const ObjectId: string): TAccountKey;
-    function StoredRefreshToken(const ObjectId: string): string;
+    function StoredRefreshToken(const UserId, ObjectId: string): string;
     procedure RunInThreads(const Work: TProc<Integer>);
     function WorkFor(const Work: TProc<Integer>; const Index: Integer): TProc;
     procedure SetUpstreamToken(const ExpiresInSeconds: Integer; const RefreshToken: string);
+    function SignInAndLink(const SignInObjectId, LinkedObjectId, RefreshToken: string): TAuthUser;
 
   public
     [Setup]
@@ -50,7 +51,19 @@ type
     procedure ConcurrentFirstSignInsCreateOneUser;
 
     [Test]
-    procedure ConcurrentUnlinksKeepTheLastAccount;
+    procedure SignInWithAccountLinkedByOtherUserCreatesNewUser;
+
+    [Test]
+    procedure SignInWithIdentityYieldsSameUserAndUpdatesLastLogin;
+
+    [Test]
+    procedure TwoUsersLinkSameAccountIndependently;
+
+    [Test]
+    procedure RelinkReplacesOnlyOwnRefreshToken;
+
+    [Test]
+    procedure NeedsReconnectOfOneUserLeavesTheOtherAlone;
 
     [Test]
     procedure RefreshRequestsTheGrantedScopes;
@@ -71,7 +84,7 @@ type
     procedure LinkAddsAccountToUser;
 
     [Test]
-    procedure LinkingAccountOfOtherUserRaises;
+    procedure LinkingAccountOfOtherUserSucceeds;
 
     [Test]
     procedure PolicyDenyRaisesAccessDenied;
@@ -122,7 +135,10 @@ type
     procedure UnlinkRemovesAccountAndCache;
 
     [Test]
-    procedure LastAccountCannotBeUnlinked;
+    procedure UnlinkingTheLastAccountIsAllowed;
+
+    [Test]
+    procedure SignInRelinksTheIdentityAccount;
   end;
 
 implementation
@@ -168,7 +184,7 @@ begin
 
   FPolicy := TFakeAccessPolicy.Create;
   FPolicyReference := FPolicy;
-  FAccounts := TLinkedAccounts.Create(FStores.Users, FStores.LinkedAccounts, FProtector, FPolicyReference, TUpstreamProviders.Create([FProviderReference]), FClockReference);
+  FAccounts := TLinkedAccounts.Create(FStores.Users, FStores.LoginIdentities, FStores.LinkedAccounts, FProtector, FPolicyReference, TUpstreamProviders.Create([FProviderReference]), FClockReference);
 end;
 
 procedure TLinkedAccountsTests.TearDown;
@@ -205,7 +221,7 @@ begin
   Assert.AreEqual('Test User', Stored.DisplayName);
 
   var Account: TLinkedAccount;
-  Assert.IsTrue(FStores.LinkedAccounts.TryFind(Tokens.Identity.Key, Account), 'account stored');
+  Assert.IsTrue(FStores.LinkedAccounts.TryFind(User.Id, Tokens.Identity.Key, Account), 'account stored');
   Assert.AreEqual(User.Id, Account.UserId);
   Assert.AreEqual('openid offline_access', Account.GrantedScopes);
   Assert.AreEqual('user@example.test', Account.UserName);
@@ -222,7 +238,7 @@ begin
   Assert.AreEqual(First.Id, Second.Id);
 
   var Account: TLinkedAccount;
-  FStores.LinkedAccounts.TryFind(SecondTokens.Identity.Key, Account);
+  FStores.LinkedAccounts.TryFind(First.Id, SecondTokens.Identity.Key, Account);
   const Context = Format('%s|%s', [First.Id, Account.Key.Value]);
   Assert.AreEqual('refresh-2', FProtector.Unprotect(Account.ProtectedRefreshToken, Context));
   Assert.AreEqual('openid offline_access mail.read', Account.GrantedScopes);
@@ -238,17 +254,17 @@ begin
   Assert.AreEqual(2, FStores.LinkedAccounts.ListForUser(User.Id).Count);
 end;
 
-procedure TLinkedAccountsTests.LinkingAccountOfOtherUserRaises;
+procedure TLinkedAccountsTests.LinkingAccountOfOtherUserSucceeds;
 begin
-  FAccounts.ResolveOrCreateUser(TokensFor('object-1', 'refresh-1'));
+  const Owner = FAccounts.ResolveOrCreateUser(TokensFor('object-1', 'refresh-1'));
   const OtherUser = FAccounts.ResolveOrCreateUser(TokensFor('object-2', 'refresh-2'));
 
-  Assert.WillRaise(
-    procedure
-    begin
-      FAccounts.Link(OtherUser.Id, TokensFor('object-1', 'refresh-3'));
-    end,
-    EAccountLinkedToOtherUser);
+  const Linked = FAccounts.Link(OtherUser.Id, TokensFor('object-1', 'refresh-3'));
+
+  Assert.AreEqual(OtherUser.Id, Linked.UserId);
+  Assert.AreEqual(2, FAccounts.ListForUser(OtherUser.Id).Count);
+  Assert.AreEqual('refresh-1', StoredRefreshToken(Owner.Id, 'object-1'));
+  Assert.AreEqual('refresh-3', StoredRefreshToken(OtherUser.Id, 'object-1'));
 end;
 
 procedure TLinkedAccountsTests.PolicyDenyRaisesAccessDenied;
@@ -278,7 +294,7 @@ begin
   const User = FAccounts.ResolveOrCreateUser(Tokens);
 
   var Account: TLinkedAccount;
-  FStores.LinkedAccounts.TryFind(Tokens.Identity.Key, Account);
+  FStores.LinkedAccounts.TryFind(User.Id, Tokens.Identity.Key, Account);
   const StoredText = TEncoding.ANSI.GetString(Account.ProtectedRefreshToken);
   Assert.IsFalse(StoredText.Contains(RefreshToken), 'plain refresh token stored');
 
@@ -294,7 +310,7 @@ begin
   FAccounts.ResolveOrCreateUser(TokensWithoutRefresh);
 
   var Account: TLinkedAccount;
-  FStores.LinkedAccounts.TryFind(TokensWithoutRefresh.Identity.Key, Account);
+  FStores.LinkedAccounts.TryFind(User.Id, TokensWithoutRefresh.Identity.Key, Account);
   const Context = Format('%s|%s', [User.Id, Account.Key.Value]);
   Assert.AreEqual('refresh-1', FProtector.Unprotect(Account.ProtectedRefreshToken, Context));
 end;
@@ -310,14 +326,14 @@ begin
   Tokens.Scope := AccessTokenScopes;
 
   const User = FAccounts.ResolveOrCreateUser(Tokens);
-  FStores.LinkedAccounts.TryFind(Tokens.Identity.Key, Result);
+  FStores.LinkedAccounts.TryFind(User.Id, Tokens.Identity.Key, Result);
   Assert.AreEqual(User.Id, Result.UserId);
 end;
 
-function TLinkedAccountsTests.StoredRefreshToken(const ObjectId: string): string;
+function TLinkedAccountsTests.StoredRefreshToken(const UserId, ObjectId: string): string;
 begin
   var Account: TLinkedAccount;
-  Assert.IsTrue(FStores.LinkedAccounts.TryFind(KeyOf(ObjectId), Account), 'account stored');
+  Assert.IsTrue(FStores.LinkedAccounts.TryFind(UserId, KeyOf(ObjectId), Account), 'account stored');
 
   Result := FProtector.Unprotect(Account.ProtectedRefreshToken, Format('%s|%s', [Account.UserId, Account.Key.Value]));
 end;
@@ -380,31 +396,82 @@ begin
   end;
 end;
 
-procedure TLinkedAccountsTests.ConcurrentUnlinksKeepTheLastAccount;
+function TLinkedAccountsTests.SignInAndLink(const SignInObjectId, LinkedObjectId, RefreshToken: string): TAuthUser;
 begin
-  const User = FAccounts.ResolveOrCreateUser(TokensFor('object-0', 'refresh-0'));
-  var Keys: TArray<TAccountKey> := [KeyOf('object-0')];
-  for var Index := 1 to ThreadCount - 1 do
-  begin
-    const ObjectId = Format('object-%d', [Index]);
-    FAccounts.Link(User.Id, TokensFor(ObjectId, 'refresh'));
-    Keys := Keys + [KeyOf(ObjectId)];
-  end;
+  Result := FAccounts.ResolveOrCreateUser(TokensFor(SignInObjectId, 'refresh-' + SignInObjectId));
+  var Tokens := TokensFor(LinkedObjectId, RefreshToken);
+  Tokens.Scope := AccessTokenScopes;
+  FAccounts.Link(Result.Id, Tokens);
+end;
 
-  var RefusedCount := 0;
-  RunInThreads(
-    procedure(Index: Integer)
+procedure TLinkedAccountsTests.SignInWithAccountLinkedByOtherUserCreatesNewUser;
+begin
+  const Owner = SignInAndLink('object-1', 'object-2', 'refresh-2');
+
+  const SignedIn = FAccounts.ResolveOrCreateUser(TokensFor('object-2', 'refresh-x'));
+
+  Assert.AreNotEqual(Owner.Id, SignedIn.Id);
+  Assert.AreEqual(2, FAccounts.ListForUser(Owner.Id).Count);
+  Assert.AreEqual('refresh-2', StoredRefreshToken(Owner.Id, 'object-2'));
+end;
+
+procedure TLinkedAccountsTests.SignInWithIdentityYieldsSameUserAndUpdatesLastLogin;
+begin
+  const First = FAccounts.ResolveOrCreateUser(TokensFor('object-1', 'refresh-1'));
+  FClock.AdvanceSeconds(SecsPerHour);
+
+  const Second = FAccounts.ResolveOrCreateUser(TokensFor('object-1', 'refresh-2'));
+
+  Assert.AreEqual(First.Id, Second.Id);
+  var Identity: TLoginIdentity;
+  Assert.IsTrue(FStores.LoginIdentities.TryFind(KeyOf('object-1'), Identity), 'identity stored');
+  Assert.AreEqual(First.Id, Identity.UserId);
+  Assert.AreEqual(FClock.NowUtc, Identity.LastLoginAtUtc);
+end;
+
+procedure TLinkedAccountsTests.TwoUsersLinkSameAccountIndependently;
+begin
+  const UserA = SignInAndLink('object-a', 'object-shared', 'rt-a');
+  const UserB = SignInAndLink('object-b', 'object-shared', 'rt-b');
+  SetUpstreamToken(3600, '');
+
+  FAccounts.Unlink(UserA.Id, KeyOf('object-shared'));
+  FAccounts.GetAccessToken(UserB.Id, KeyOf('object-shared'), ['Mail.Read']);
+
+  Assert.AreEqual(1, FAccounts.ListForUser(UserA.Id).Count);
+  Assert.AreEqual(2, FAccounts.ListForUser(UserB.Id).Count);
+  Assert.AreEqual('rt-b', FProvider.LastRefreshInput);
+end;
+
+procedure TLinkedAccountsTests.RelinkReplacesOnlyOwnRefreshToken;
+begin
+  const UserA = SignInAndLink('object-a', 'object-shared', 'rt-a');
+  const UserB = SignInAndLink('object-b', 'object-shared', 'rt-b');
+
+  FAccounts.Link(UserA.Id, TokensFor('object-shared', 'rt-a2'));
+
+  Assert.AreEqual('rt-a2', StoredRefreshToken(UserA.Id, 'object-shared'));
+  Assert.AreEqual('rt-b', StoredRefreshToken(UserB.Id, 'object-shared'));
+end;
+
+procedure TLinkedAccountsTests.NeedsReconnectOfOneUserLeavesTheOtherAlone;
+begin
+  const UserA = SignInAndLink('object-a', 'object-shared', 'rt-a');
+  const UserB = SignInAndLink('object-b', 'object-shared', 'rt-b');
+  FProvider.IsRevoked := True;
+
+  Assert.WillRaise(
+    procedure
     begin
-      try
-        FAccounts.Unlink(User.Id, Keys[Index]);
-      except
-        on ELastAccountCannotBeUnlinked do
-          TInterlocked.Increment(RefusedCount);
-      end;
-    end);
+      FAccounts.GetAccessToken(UserA.Id, KeyOf('object-shared'), ['Mail.Read']);
+    end,
+    ELinkedAccountNeedsReconnect);
 
-  Assert.AreEqual(1, RefusedCount, 'refused unlinks');
-  Assert.AreEqual(1, FAccounts.ListForUser(User.Id).Count);
+  var Stored: TLinkedAccount;
+  FStores.LinkedAccounts.TryFind(UserA.Id, KeyOf('object-shared'), Stored);
+  Assert.IsTrue(Stored.NeedsReconnect, 'A needs reconnect');
+  FStores.LinkedAccounts.TryFind(UserB.Id, KeyOf('object-shared'), Stored);
+  Assert.IsFalse(Stored.NeedsReconnect, 'B untouched');
 end;
 
 procedure TLinkedAccountsTests.RefreshRequestsTheGrantedScopes;
@@ -426,7 +493,7 @@ begin
   FAccounts.GetAccessToken(Account.UserId, Account.Key, ['Mail.Read']);
 
   var Stored: TLinkedAccount;
-  FStores.LinkedAccounts.TryFind(Account.Key, Stored);
+  FStores.LinkedAccounts.TryFind(Account.UserId, Account.Key, Stored);
   Assert.AreEqual('openid offline_access', Stored.GrantedScopes, 'an administrator removed Mail.Read');
 end;
 
@@ -434,13 +501,13 @@ procedure TLinkedAccountsTests.SignInWithoutRefreshTokenKeepsReconnectFlagAndSco
 begin
   const Account = LinkAccount('object-1', 'refresh-1');
   var Stored: TLinkedAccount;
-  FStores.LinkedAccounts.TryFind(Account.Key, Stored);
+  FStores.LinkedAccounts.TryFind(Account.UserId, Account.Key, Stored);
   Stored.NeedsReconnect := True;
   FStores.LinkedAccounts.Save(Stored);
 
   FAccounts.ResolveOrCreateUser(TokensFor('object-1', ''));
 
-  FStores.LinkedAccounts.TryFind(Account.Key, Stored);
+  FStores.LinkedAccounts.TryFind(Account.UserId, Account.Key, Stored);
   Assert.IsTrue(Stored.NeedsReconnect, 'the stored refresh token is still the revoked one');
   Assert.AreEqual(AccessTokenScopes, Stored.GrantedScopes, 'the scopes still describe the stored refresh token');
 end;
@@ -472,7 +539,7 @@ begin
   const Token = FAccounts.GetAccessToken(Account.UserId, Account.Key, ['Mail.Read']);
 
   Assert.AreEqual('refresh-1', FProvider.LastRefreshInput);
-  Assert.AreEqual('refresh-2', StoredRefreshToken('object-1'));
+  Assert.AreEqual('refresh-2', StoredRefreshToken(Account.UserId, 'object-1'));
   Assert.AreEqual(FProvider.ExpiresAtUtc, Token.ExpiresAtUtc, 0.00001);
   Assert.IsNotEmpty(Token.AccessToken);
 end;
@@ -484,7 +551,7 @@ begin
 
   FAccounts.GetAccessToken(Account.UserId, Account.Key, ['Mail.Read']);
 
-  Assert.AreEqual('refresh-1', StoredRefreshToken('object-1'));
+  Assert.AreEqual('refresh-1', StoredRefreshToken(Account.UserId, 'object-1'));
 end;
 
 procedure TLinkedAccountsTests.ConcurrentGetAccessTokenRefreshesOnce;
@@ -522,7 +589,7 @@ begin
 
   Assert.AreEqual(0, FailureCount, 'failures');
   Assert.AreEqual(1, FProvider.RefreshCount, 'refresh calls');
-  Assert.AreEqual('refresh-2', StoredRefreshToken('object-1'));
+  Assert.AreEqual('refresh-2', StoredRefreshToken(Account.UserId, 'object-1'));
 end;
 
 procedure TLinkedAccountsTests.InvalidGrantMarksNeedsReconnect;
@@ -541,7 +608,7 @@ begin
   end;
 
   var Stored: TLinkedAccount;
-  FStores.LinkedAccounts.TryFind(Account.Key, Stored);
+  FStores.LinkedAccounts.TryFind(Account.UserId, Account.Key, Stored);
   Assert.IsTrue(Stored.NeedsReconnect, 'NeedsReconnect stored');
 end;
 
@@ -549,7 +616,7 @@ procedure TLinkedAccountsTests.NeedsReconnectRaisesWithoutUpstreamCall;
 begin
   const Account = LinkAccount('object-1', 'refresh-1');
   var Stored: TLinkedAccount;
-  FStores.LinkedAccounts.TryFind(Account.Key, Stored);
+  FStores.LinkedAccounts.TryFind(Account.UserId, Account.Key, Stored);
   Stored.NeedsReconnect := True;
   FStores.LinkedAccounts.Save(Stored);
   SetUpstreamToken(3600, 'refresh-2');
@@ -635,7 +702,7 @@ begin
 
   const Account = LinkAccount('object-1', 'refresh-1');
   var Stored: TLinkedAccount;
-  FStores.LinkedAccounts.TryFind(Account.Key, Stored);
+  FStores.LinkedAccounts.TryFind(Account.UserId, Account.Key, Stored);
   const Context = Format('%s|%s', [Account.UserId, Account.Key.Value]);
   Stored.ProtectedRefreshToken := OldProtector.Protect('refresh-1', Context);
   FStores.LinkedAccounts.Save(Stored);
@@ -644,13 +711,13 @@ begin
   RotatedKeys[OldKeyId] := OldKey;
   RotatedKeys[KeyId] := NewKey;
   const RotatedProtector: ISecretProtector = TAesGcmProtector.Create(TKeyRing.Create(KeyId, RotatedKeys));
-  const Accounts: ILinkedAccounts = TLinkedAccounts.Create(FStores.Users, FStores.LinkedAccounts, RotatedProtector, FPolicyReference, TUpstreamProviders.Create([FProviderReference]), FClockReference);
+  const Accounts: ILinkedAccounts = TLinkedAccounts.Create(FStores.Users, FStores.LoginIdentities, FStores.LinkedAccounts, RotatedProtector, FPolicyReference, TUpstreamProviders.Create([FProviderReference]), FClockReference);
   Assert.IsTrue(RotatedProtector.NeedsRewrap(Stored.ProtectedRefreshToken), 'precondition: old key');
   SetUpstreamToken(3600, '');
 
   Accounts.GetAccessToken(Account.UserId, Account.Key, ['Mail.Read']);
 
-  FStores.LinkedAccounts.TryFind(Account.Key, Stored);
+  FStores.LinkedAccounts.TryFind(Account.UserId, Account.Key, Stored);
   Assert.IsFalse(RotatedProtector.NeedsRewrap(Stored.ProtectedRefreshToken), 'rewrapped');
   Assert.AreEqual('refresh-1', RotatedProtector.Unprotect(Stored.ProtectedRefreshToken, Context));
 end;
@@ -680,17 +747,25 @@ begin
   Assert.AreEqual(2, FAccounts.ListForUser(Account.UserId).Count);
 end;
 
-procedure TLinkedAccountsTests.LastAccountCannotBeUnlinked;
+procedure TLinkedAccountsTests.UnlinkingTheLastAccountIsAllowed;
 begin
   const Account = LinkAccount('object-1', 'refresh-1');
 
-  Assert.WillRaise(
-    procedure
-    begin
-      FAccounts.Unlink(Account.UserId, Account.Key);
-    end,
-    ELastAccountCannotBeUnlinked);
-  Assert.AreEqual(1, FAccounts.ListForUser(Account.UserId).Count);
+  FAccounts.Unlink(Account.UserId, Account.Key);
+
+  Assert.AreEqual(0, FAccounts.ListForUser(Account.UserId).Count);
+end;
+
+procedure TLinkedAccountsTests.SignInRelinksTheIdentityAccount;
+begin
+  const Account = LinkAccount('object-1', 'refresh-1');
+  FAccounts.Unlink(Account.UserId, Account.Key);
+
+  const User = FAccounts.ResolveOrCreateUser(TokensFor('object-1', 'refresh-2'));
+
+  Assert.AreEqual(Account.UserId, User.Id);
+  Assert.AreEqual(1, FAccounts.ListForUser(User.Id).Count);
+  Assert.AreEqual('refresh-2', StoredRefreshToken(User.Id, 'object-1'));
 end;
 
 end.

@@ -98,7 +98,6 @@ const
   StatusBadRequest = 400;
   StatusForbidden = 403;
   StatusNotFound = 404;
-  StatusConflict = 409;
   StatusInternalServerError = 500;
   StatusServiceUnavailable = 503;
 
@@ -126,7 +125,6 @@ const
   NoSessionMessage = 'Your session has ended. Please sign in again.';
   CsrfMessage = 'The request could not be verified. Please go back to your account page and try again.';
   AccountNotFoundMessage = 'The account was not found.';
-  LastAccountMessage = 'The last linked account cannot be unlinked, because you could no longer sign in.';
   NoProviderMessage = 'No sign-in provider is configured.';
   LoggedOutMessage = 'You have been logged out.';
 
@@ -417,8 +415,6 @@ begin
     FAccounts.Unlink(Session.UserId, Account.Key);
     Result := WithNoStore(TWebResponse.Redirect(AccountPath));
   except
-    on ELastAccountCannotBeUnlinked do
-      Result := ErrorPage(StatusConflict, LastAccountMessage);
     on ELinkedAccountNotFound do
       Result := ErrorPage(StatusNotFound, AccountNotFoundMessage);
   end;
