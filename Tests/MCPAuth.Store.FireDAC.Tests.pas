@@ -24,6 +24,7 @@ type
     procedure DropSchema;
     procedure CopyMigrations(const TargetPath: string; const UpToVersion: Integer);
     procedure InsertUserWithAccount(const UserId, ObjectId, LinkedAt: string);
+    procedure InsertAccount(const UserId, ObjectId, LinkedAt: string);
     function IdentityKeyOf(const UserId: string): string;
 
   protected
@@ -45,6 +46,12 @@ type
 
     [Test]
     procedure AddMissingGivesUsersWithoutIdentityTheirOldestAccount;
+
+    [Test]
+    procedure AddMissingSkipsAccountLinkedByOtherUser;
+
+    [Test]
+    procedure AddMissingIgnoresLinksWithoutUser;
 
     [Test]
     procedure Migration0004GivesExistingUsersTheirOldestAccount;
@@ -200,6 +207,40 @@ begin
   end;
 end;
 
+procedure TFireDACStoreContractTests.AddMissingSkipsAccountLinkedByOtherUser;
+begin
+  RequireStore;
+
+  ClearTables;
+  InsertUserWithAccount('u1', 'object-shared', '2026-06-01 10:00:00+00');
+  InsertUserWithAccount('u2', 'object-shared', '2026-06-02 10:00:00+00');
+  const Identities = TFireDACLoginIdentityRepository.Create(FFactory);
+  try
+    const Added = Identities.AddMissing;
+
+    Assert.AreEqual(0, Added);
+    Assert.AreEqual<Int64>(0, TTestPostgres.QueryInt(FFactory, 'SELECT COUNT(*) FROM mcpauth_login_identities'));
+  finally
+    Identities.Free;
+  end;
+end;
+
+procedure TFireDACStoreContractTests.AddMissingIgnoresLinksWithoutUser;
+begin
+  RequireStore;
+
+  ClearTables;
+  InsertAccount('ghost', 'object-ghost', '2026-06-01 10:00:00+00');
+  const Identities = TFireDACLoginIdentityRepository.Create(FFactory);
+  try
+    const Added = Identities.AddMissing;
+
+    Assert.AreEqual(0, Added);
+  finally
+    Identities.Free;
+  end;
+end;
+
 procedure TFireDACStoreContractTests.Migration0004GivesExistingUsersTheirOldestAccount;
 begin
   RequireStore;
@@ -212,6 +253,7 @@ begin
     InsertUserWithAccount('u1', 'object-a', '2026-06-01 10:00:00+00');
     InsertUserWithAccount('u2', 'object-c', '2026-06-03 10:00:00+00');
     InsertUserWithAccount('u2', 'object-b', '2026-06-02 10:00:00+00');
+    InsertAccount('ghost', 'object-ghost', '2026-06-01 09:00:00+00');
 
     CopyMigrations(MigrationsPath, 4);
     TFireDACMigrations.Apply(FFactory, 'postgres', MigrationsPath);
@@ -219,7 +261,7 @@ begin
     Assert.AreEqual<Int64>(2, TTestPostgres.QueryInt(FFactory, 'SELECT COUNT(*) FROM mcpauth_login_identities'));
     Assert.AreEqual('microsoft:tenant-1:object-a', IdentityKeyOf('u1'));
     Assert.AreEqual('microsoft:tenant-1:object-b', IdentityKeyOf('u2'));
-    Assert.AreEqual<Int64>(3, TTestPostgres.QueryInt(FFactory, 'SELECT COUNT(*) FROM mcpauth_linked_accounts'));
+    Assert.AreEqual<Int64>(4, TTestPostgres.QueryInt(FFactory, 'SELECT COUNT(*) FROM mcpauth_linked_accounts'));
 
     InsertUserWithAccount('u2', 'object-a', '2026-06-04 10:00:00+00');
     Assert.AreEqual<Int64>(2, TTestPostgres.QueryInt(FFactory, 'SELECT COUNT(*) FROM mcpauth_linked_accounts WHERE object_id = ''object-a'''));
@@ -249,6 +291,11 @@ end;
 procedure TFireDACStoreContractTests.InsertUserWithAccount(const UserId, ObjectId, LinkedAt: string);
 begin
   TTestPostgres.Execute(FFactory, Format(InsertTestUser, [UserId, LinkedAt]));
+  InsertAccount(UserId, ObjectId, LinkedAt);
+end;
+
+procedure TFireDACStoreContractTests.InsertAccount(const UserId, ObjectId, LinkedAt: string);
+begin
   TTestPostgres.Execute(FFactory, Format(InsertTestAccount, [ObjectId, UserId, LinkedAt]));
 end;
 
